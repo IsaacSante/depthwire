@@ -5,7 +5,6 @@ An iPhone's LiDAR instead of a Kinect: the apps, the gear, the room setup and th
 
 <p align="center">
   <img src="media/phone.gif" width="250" alt="An iPhone on a tripod streaming depth to a laptop">
-  <img src="media/people.gif" width="250" alt="A cat walking past, shown as a clean shape on the laptop">
   <img src="media/install-loop.gif" width="250" alt="A person in front of a projection that reacts to them">
 </p>
 
@@ -66,20 +65,13 @@ Then set how near and how far to look. It works in the dark.
 
 ## 4 · Make visuals
 
-<table><tr>
-<td width="270"><img src="media/people.gif" width="250" alt="Only what moves shows up: a cat as a depth shape"></td>
-<td>
+<p align="center"><img src="media/depth-output.png" width="620" alt="What other apps get from DepthWire: a person as a grey shape on black"></p>
 
-Only what wasn't in the empty room shows up: people, or a cat.
+This is what your visuals get: only what wasn't in the empty room. White is near, dark is far.
 
-In **TouchDesigner**, add a Video Device In TOP and pick DepthWire. You get grey shapes on black: white is near, dark is far.
-
-Paste in a starter and build from there.
+In **TouchDesigner**, add a Video Device In TOP and pick DepthWire. Paste in a starter and build from there.
 
 → [TouchDesigner starters](touchdesigner/)
-
-</td>
-</tr></table>
 
 ## 5 · Run a show
 
