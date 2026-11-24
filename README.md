@@ -6,7 +6,7 @@ An iPhone's LiDAR instead of a Kinect: the apps, the gear, the room setup and th
 <p align="center">
   <img src="media/phone.gif" width="250" alt="An iPhone on a tripod streaming depth to a laptop">
   <img src="media/people.gif" width="250" alt="A cat walking past, shown as a clean shape on the laptop">
-  <img src="media/install.gif" width="250" alt="A person in front of a projection that reacts to them">
+  <img src="media/install-loop.gif" width="250" alt="A person in front of a projection that reacts to them">
 </p>
 
 <p align="center">
@@ -82,7 +82,7 @@ Paste in a starter and build from there.
 ## 5 · Run a show
 
 <table><tr>
-<td width="270"><img src="media/install.gif" width="250" alt="The install: a projection reacting to a person"></td>
+<td width="270"><img src="media/install-loop.gif" width="250" alt="The install: a projection reacting to a person"></td>
 <td>
 
 - **Use a cable** for anything that runs for hours.
