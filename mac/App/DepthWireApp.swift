@@ -10,6 +10,7 @@ struct DepthWireApp: App {
         WindowGroup("DepthWire") {
             ContentView()
                 .environmentObject(model)
+                .preferredColorScheme(.dark)   // the window is designed dark; depth reads best on it
         }
         .windowResizability(.contentSize)
     }

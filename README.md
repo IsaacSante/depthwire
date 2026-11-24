@@ -11,7 +11,7 @@ DepthWire is two small apps that work together:
 
 It was built for an interactive projection install where a Kinect or Orbbec wasn't available. A phone on a tripod did the job.
 
-> **Status: early.** Both apps work and build from this repo. There are no downloads yet: a signed Mac app, the iPhone app on the App Store, and raw depth output are still to come. See [Roadmap](#roadmap).
+> **Status: early.** The Mac app is available as a signed download: **[get DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases/latest)**. The iPhone app isn't on the App Store yet, so for now you build it from this repo with Xcode. See [Roadmap](#roadmap).
 
 ## How it works
 
@@ -91,7 +91,7 @@ A virtual camera is 8-bit, so that is 256 steps across your range (about 2 cm ov
 ## Roadmap
 
 - [ ] Raw 16-bit depth output for TouchDesigner, Resolume and Unity (Syphon first, then NDI)
-- [ ] Signed, notarized Mac download
+- [x] Signed, notarized Mac download
 - [ ] iPhone app on the App Store
 - [ ] Reconnect to the camera extension without restarting after first approval
 
