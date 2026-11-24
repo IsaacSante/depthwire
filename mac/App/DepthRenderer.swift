@@ -26,6 +26,13 @@ final class DepthRenderer {
     var cropZoom: Float = 1
     var cropShiftX: Float = 0
     var cropShiftY: Float = 0
+    /// Mirror the picture other apps get, left to right and/or top to bottom.
+    var flipX = false
+    var flipY = false
+    /// The size of the picture other apps get; one of `CameraConstants.sizes`.
+    var outputSize = (width: Int(CameraConstants.output.width), height: Int(CameraConstants.output.height)) {
+        didSet { if oldValue != outputSize { makePool() } }
+    }
     /// With player labels: tint each player its own color instead of the depth palette.
     var playerColors = false
     var palette: Palette = .turbo {
@@ -36,19 +43,23 @@ final class DepthRenderer {
     private var small = [UInt8]()
     private var pool: CVPixelBufferPool?
 
-    init() {
+    init() { makePool() }
+
+    private func makePool() {
         let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: Int(CameraConstants.output.width),
-            kCVPixelBufferHeightKey as String: Int(CameraConstants.output.height),
+            kCVPixelBufferWidthKey as String: outputSize.width,
+            kCVPixelBufferHeightKey as String: outputSize.height,
             kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
         ]
+        pool = nil
         CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool)
     }
 
     /// The part of a `width`×`height` depth picture that Fill keeps, in its pixels.
-    static func cropRect(width: Int, height: Int, zoom: Float, shiftX: Float, shiftY: Float) -> (x: Int, y: Int, w: Int, h: Int) {
-        let outWidth = Double(CameraConstants.output.width), outHeight = Double(CameraConstants.output.height)
+    static func cropRect(width: Int, height: Int, zoom: Float, shiftX: Float, shiftY: Float,
+                         output: (width: Int, height: Int)) -> (x: Int, y: Int, w: Int, h: Int) {
+        let outWidth = Double(output.width), outHeight = Double(output.height)
         let fillScale = max(outWidth / Double(width), outHeight / Double(height)) * Double(max(zoom, 1))
         let w = max(2, min(width, Int((outWidth / fillScale).rounded())))
         let h = max(2, min(height, Int((outHeight / fillScale).rounded())))
@@ -73,6 +84,7 @@ final class DepthRenderer {
     /// 1… = player index.
     func render(millimeters: Data, labels: [UInt8]?, width: Int, height: Int, makePreview: Bool) -> (CVPixelBuffer?, CGImage?) {
         colorize(millimeters, labels: labels, width: width, height: height)
+        if flipX || flipY { flipSmall(width: width, height: height) }
 
         var output: CVPixelBuffer?
         if let pool { CVPixelBufferPoolCreatePixelBuffer(nil, pool, &output) }
@@ -105,7 +117,11 @@ final class DepthRenderer {
             case .fill:
                 // A frame-shaped crop of the source into the whole output.
                 _ = fillScale
-                let (x, y, w, h) = Self.cropRect(width: width, height: height, zoom: cropZoom, shiftX: cropShiftX, shiftY: cropShiftY)
+                var (x, y, w, h) = Self.cropRect(width: width, height: height, zoom: cropZoom, shiftX: cropShiftX, shiftY: cropShiftY,
+                                                 output: (outWidth, outHeight))
+                // the picture was mirrored before cropping, so the kept part moves with it
+                if flipX { x = width - x - w }
+                if flipY { y = height - y - h }
                 src = vImage_Buffer(data: smallBytes.baseAddress! + (y * width + x) * 4, height: vImagePixelCount(h),
                                     width: vImagePixelCount(w), rowBytes: width * 4)
                 dst = whole
@@ -125,6 +141,25 @@ final class DepthRenderer {
             }
         }
         return (output, preview)
+    }
+
+    /// Mirrors `small` in place.
+    private func flipSmall(width: Int, height: Int) {
+        small.withUnsafeMutableBytes { raw in
+            let pixels = raw.bindMemory(to: UInt32.self)
+            if flipX {
+                for row in 0..<height {
+                    var a = row * width, b = row * width + width - 1
+                    while a < b { pixels.swapAt(a, b); a += 1; b -= 1 }
+                }
+            }
+            if flipY {
+                for row in 0..<(height / 2) {
+                    let a = row * width, b = (height - 1 - row) * width
+                    for column in 0..<width { pixels.swapAt(a + column, b + column) }
+                }
+            }
+        }
     }
 
     /// Fills `small` with BGRA colors at the depth map's own resolution.

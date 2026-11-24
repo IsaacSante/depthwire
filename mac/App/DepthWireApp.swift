@@ -66,6 +66,11 @@ final class AppModel: ObservableObject {
     @Published var cropZoom = Saved.double("cropZoom", 1) { didSet { changed("cropZoom", cropZoom) } }
     @Published var cropShiftX = Saved.double("cropShiftX", 0) { didSet { changed("cropShiftX", cropShiftX) } }
     @Published var cropShiftY = Saved.double("cropShiftY", 0) { didSet { changed("cropShiftY", cropShiftY) } }
+    @Published var flipX = Saved.bool("flipX", false) { didSet { changed("flipX", flipX) } }
+    @Published var flipY = Saved.bool("flipY", false) { didSet { changed("flipY", flipY) } }
+    /// Which of `CameraConstants.sizes` other apps get.
+    @Published var sizeIndex = min(max(Int(Saved.double("sizeIndex", 0)), 0), CameraConstants.sizes.count - 1) { didSet { changed("sizeIndex", Double(sizeIndex)) } }
+    var outputSize: (width: Int, height: Int) { (Int(CameraConstants.sizes[sizeIndex].width), Int(CameraConstants.sizes[sizeIndex].height)) }
     /// Show the phone's whole picture in the corner while setting up.
     @Published var showOverview = Saved.bool("showOverview", true) { didSet { changed("showOverview", showOverview) } }
     /// Show only what isn't part of the recorded empty room.
@@ -162,6 +167,7 @@ final class AppModel: ObservableObject {
         nearMeters = 0.2; farMeters = 5.0; autoRange = false
         palette = .turbo; framing = .fill
         cropZoom = 1; cropShiftX = 0; cropShiftY = 0; showOverview = true
+        flipX = false; flipY = false; sizeIndex = 0
         hideRoom = false; peopleFromCamera = false; playerColors = false
         thresholdCentimeters = 15; adaptBackground = true
         minConfidence = .medium; smoothing = 0.5
@@ -184,7 +190,9 @@ final class AppModel: ObservableObject {
         let adapt = adaptBackground, minConfidence = minConfidence, smoothing = Float(smoothing)
         let crop = crop
         let zoom = Float(cropZoom), shiftX = Float(cropShiftX), shiftY = Float(cropShiftY), overview = showOverview
+        let flipX = flipX, flipY = flipY, size = outputSize
         receiver.queue.async { [self] in
+            renderer.flipX = flipX; renderer.flipY = flipY; renderer.outputSize = size
             renderer.cropZoom = zoom; renderer.cropShiftX = shiftX; renderer.cropShiftY = shiftY
             queueOverview = overview
             queueIsolate = isolate
@@ -353,8 +361,8 @@ struct ContentView: View {
                     .overlay(Text("No depth yet. Open DepthWire on your iPhone.").foregroundStyle(.secondary))
             }
         }
-        .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height),
-                     contentMode: .fit)
+        .aspectRatio(CGFloat(model.outputSize.width) / CGFloat(model.outputSize.height), contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: 420)
         .overlay(alignment: .bottomTrailing) {
             if model.showOverview, let raw = model.rawPreview {
                 VStack(alignment: .leading, spacing: 3) {
@@ -367,7 +375,7 @@ struct ContentView: View {
                             if model.framing == .fill {
                                 GeometryReader { geo in
                                     let r = DepthRenderer.cropRect(width: raw.width, height: raw.height, zoom: Float(model.cropZoom),
-                                                                   shiftX: Float(model.cropShiftX), shiftY: Float(model.cropShiftY))
+                                                                   shiftX: Float(model.cropShiftX), shiftY: Float(model.cropShiftY), output: model.outputSize)
                                     let k = geo.size.width / CGFloat(raw.width)
                                     Rectangle().strokeBorder(.white, lineWidth: 1.5)
                                         .frame(width: CGFloat(r.w) * k, height: CGFloat(r.h) * k)
@@ -384,7 +392,7 @@ struct ContentView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
-        .overlay(alignment: .topLeading) { badge("What other apps get", symbol: "video") }
+        .overlay(alignment: .topLeading) { badge("What other apps get · \(model.outputSize.width) × \(model.outputSize.height)", symbol: "video") }
         .overlay(alignment: .topTrailing) {
             if model.fps > 0 { badge(String(format: "%.0f fps", model.fps), symbol: nil) }
         }
@@ -526,14 +534,30 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var look: some View {
-        section("3", "Pick a look", "How the depth is drawn for other apps.") {
+        section("3", "Set the output", "What other apps get: the colors, the size, and which way round.") {
             Picker("Colors", selection: $model.palette) {
                 ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             Toggle("Give each person their own color", isOn: $model.playerColors)
                 .disabled(!model.hideRoom)
+            Divider().padding(.vertical, 2)
+            Picker("Size", selection: $model.sizeIndex) {
+                ForEach(CameraConstants.sizes.indices, id: \.self) { i in
+                    Text(Self.sizeName(CameraConstants.sizes[i])).tag(i)
+                }
+            }
+            .help("The size of the picture other apps get. Pick the same size in the other app; if it asks for a different one, the picture is fitted into that with black bars.")
+            HStack(spacing: 18) {
+                Toggle("Flip left ↔ right", isOn: $model.flipX)
+                Toggle("Flip up ↕ down", isOn: $model.flipY)
+            }
         }
+    }
+
+    private static func sizeName(_ size: (width: Int32, height: Int32)) -> String {
+        let shape = size.width == size.height ? "square" : size.width * 3 == size.height * 4 ? "4:3, the phone's whole picture" : "16:9"
+        return "\(size.width) × \(size.height)  (\(shape))"
     }
 
     @ViewBuilder private var advanced: some View {
