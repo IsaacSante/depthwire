@@ -310,6 +310,7 @@ final class AppModel: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("showAdvanced") private var showAdvanced = false
+    @AppStorage("showAreaOptions") private var showAreaOptions = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
@@ -421,31 +422,35 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("1", "Choose the area", "Tell the phone what to pay attention to. Everything outside it is ignored.") {
-            Text("How near and how far").font(.subheadline.weight(.semibold))
+        section("1", "Choose the area", "Tell the phone how near and how far to look. Everything outside that is ignored.") {
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
             }
             .disabled(model.autoRange)
-            HStack {
-                Toggle("Set it for me", isOn: $model.autoRange)
-                    .help("Fits the distances to the people in view, or to the whole scene when nobody is.")
-                if let range = model.autoRangeMeters {
-                    Text(String(format: "%.1f to %.1f m", range.near, range.far))
-                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            DisclosureGroup("More options", isExpanded: $showAreaOptions) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Toggle("Set the distances for me", isOn: $model.autoRange)
+                            .help("Fits the distances to the people in view, or to the whole scene when nobody is.")
+                        if let range = model.autoRangeMeters {
+                            Text(String(format: "%.1f to %.1f m", range.near, range.far))
+                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Which part of the picture").font(.subheadline.weight(.semibold)).padding(.top, 4)
+                    Group {
+                        plainSlider("Zoom in", value: $model.cropZoom, range: 1...3, format: "%.1f×")
+                        plainSlider("Left / right", value: $model.cropShiftX, range: -1...1, format: "%+.2f")
+                        plainSlider("Up / down", value: $model.cropShiftY, range: -1...1, format: "%+.2f")
+                    }
+                    .disabled(model.framing != .fill)
+                    Text(model.framing == .fill ? "The white outline in the corner view shows the part other apps get."
+                                                : "Turn off “Show the whole picture with black bars” under Advanced to crop.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.top, 8)
             }
-            Text("Which part of the picture").font(.subheadline.weight(.semibold)).padding(.top, 6)
-            Group {
-                plainSlider("Zoom in", value: $model.cropZoom, range: 1...3, format: "%.1f×")
-                plainSlider("Left / right", value: $model.cropShiftX, range: -1...1, format: "%+.2f")
-                plainSlider("Up / down", value: $model.cropShiftY, range: -1...1, format: "%+.2f")
-            }
-            .disabled(model.framing != .fill)
-            Text(model.framing == .fill ? "The white outline in the corner view shows the part other apps get."
-                                        : "Turn off “Show the whole picture with black bars” under Advanced to crop.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
