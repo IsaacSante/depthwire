@@ -83,7 +83,7 @@ final class AppModel: ObservableObject {
     @Published var thresholdCentimeters = Saved.double("threshold", 15) { didSet { changed("threshold", thresholdCentimeters) } }
     @Published var adaptBackground = Saved.bool("adapt", true) { didSet { changed("adapt", adaptBackground) } }
     @Published var minConfidence = DepthPreprocessor.ConfidenceLevel(rawValue: Int(Saved.double("confidence", 1))) ?? .medium { didSet { changed("confidence", Double(minConfidence.rawValue)) } }
-    @Published var smoothing = Saved.double("smoothing", 0.5) { didSet { changed("smoothing", smoothing) } }
+    @Published var smoothing = Saved.double("smoothing", 0.15) { didSet { changed("smoothing", smoothing) } }
     @Published var roomState = RoomState.none
     @Published var crop = CropSettings.load() { didSet { crop.save(); pushSettings() } }
     /// A sample of what the phone sees, in room feet, for the crop-box plots.
@@ -178,7 +178,7 @@ final class AppModel: ObservableObject {
         flipX = false; flipY = false; sizeIndex = 0
         hideRoom = false; peopleFromCamera = false; playerColors = false
         thresholdCentimeters = 15; adaptBackground = true
-        minConfidence = .medium; smoothing = 0.5
+        minConfidence = .medium; smoothing = 0.15
         crop = CropSettings()
     }
 
