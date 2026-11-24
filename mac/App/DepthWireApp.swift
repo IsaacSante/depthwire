@@ -343,8 +343,8 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     emptyRoom
-                    look
                     distance
+                    look
                     advanced
                     Button("Reset all settings") { model.resetToDefaults() }
                         .controlSize(.small)
@@ -471,7 +471,7 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("3", "Choose the area", "Tell the phone how near and how far to look. Everything outside that is ignored.") {
+        section("2", "Choose the area", "Tell the phone how near and how far to look. Everything outside that is ignored.") {
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
@@ -572,7 +572,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var look: some View {
-        section("2", "Set the output", "What other apps get: the colors, the size, and which way round.") {
+        section("3", "Set the output", "What other apps get: the colors, the size, and which way round.") {
             Picker("Colors", selection: $model.palette) {
                 ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
             }
