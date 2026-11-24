@@ -428,7 +428,7 @@ struct ContentView: View {
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
             }
             .disabled(model.autoRange)
-            DisclosureGroup("More options", isExpanded: $showAreaOptions) {
+            expander("More options", isExpanded: $showAreaOptions) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Toggle("Set the distances for me", isOn: $model.autoRange)
@@ -449,7 +449,6 @@ struct ContentView: View {
                                                 : "Turn off “Show the whole picture with black bars” under Advanced to crop.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 8)
             }
         }
     }
@@ -482,7 +481,7 @@ struct ContentView: View {
             if model.roomState == .ready || model.peopleFromCamera {
                 Toggle("Hide the empty room", isOn: $model.hideRoom)
             }
-            if model.hideRoom {
+            if model.hideRoom && (model.roomState == .ready || model.peopleFromCamera) {
                 HStack {
                     Text("Sensitivity").frame(width: 84, alignment: .leading)
                     Slider(value: $model.thresholdCentimeters, in: 3...60)
@@ -532,7 +531,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var advanced: some View {
-        DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+        expander("Advanced", isExpanded: $showAdvanced, card: true) {
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Show everything the phone sees in the corner", isOn: $model.showOverview)
                     .help("A small view of the phone's whole picture, with what's too near, too far or hidden marked. Other apps never see it.")
@@ -574,7 +573,6 @@ struct ContentView: View {
                 .controlSize(.small)
                 .help("Installs or removes the “\(CameraConstants.deviceName)” virtual camera.")
             }
-            .padding(.top, 8)
         }
     }
 
@@ -622,6 +620,32 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(highlighted ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(highlighted ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.08)))
+    }
+
+    /// A section that opens and closes; the whole row is the button, not just the arrow.
+    private func expander<Content: View>(_ title: String, isExpanded: Binding<Bool>, card: Bool = false,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.wrappedValue.toggle() }
+            } label: {
+                HStack {
+                    Text(title).font(.callout.weight(.medium))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 180 : 0))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .frame(maxWidth: .infinity)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                .contentShape(RoundedRectangle(cornerRadius: 9))
+            }
+            .buttonStyle(.plain)
+            if isExpanded.wrappedValue {
+                content().padding(.horizontal, card ? 4 : 0)
+            }
+        }
     }
 
     private func meterSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
