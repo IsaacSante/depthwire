@@ -11,7 +11,7 @@ DepthWire is two small apps that work together:
 
 It was built for an interactive projection install where a Kinect or Orbbec wasn't available. A phone on a tripod did the job.
 
-> **Status: early.** The Mac app is available as a signed download: **[get DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases/latest)**. The iPhone app isn't on the App Store yet, so for now you build it from this repo with Xcode. See [Roadmap](#roadmap).
+> **Status: early.** The Mac app is available as a signed download: **[get DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases)**. The iPhone app isn't on the App Store yet, so for now you build it from this repo with Xcode. See [Roadmap](#roadmap).
 
 ## How it works
 
