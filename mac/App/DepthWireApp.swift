@@ -310,7 +310,6 @@ final class AppModel: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("showAdvanced") private var showAdvanced = false
-    @AppStorage("showExtras") private var showExtras = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
@@ -325,7 +324,6 @@ struct ContentView: View {
                     distance
                     emptyRoom
                     look
-                    extras
                     advanced
                     Button("Reset to defaults") { model.resetToDefaults() }
                         .help("Puts every setting back to how DepthWire first opens. Your recorded empty room is kept.")
@@ -335,7 +333,7 @@ struct ContentView: View {
             .frame(width: 390)
         }
         .padding(20)
-        .frame(height: 640)
+        .frame(height: 720)
     }
 
     // MARK: the picture
@@ -392,7 +390,7 @@ struct ContentView: View {
             } else if case .recording = model.roomState {
                 RoundedRectangle(cornerRadius: 10).strokeBorder(.red, lineWidth: 5)
                     .overlay(alignment: .top) {
-                        Text("Recording the empty room").font(.headline).foregroundStyle(.white)
+                        Text("Calibrating the empty room").font(.headline).foregroundStyle(.white)
                             .padding(8).background(.red, in: Capsule()).padding(12)
                     }
             }
@@ -422,7 +420,8 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("1", "Distance", "Only things between these two distances from the phone are shown. Anything nearer or farther is left out.") {
+        section("1", "Area", "Choose what the phone should pay attention to. Everything outside it is left out.") {
+            Text("How near and how far").font(.subheadline.weight(.semibold))
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
@@ -436,11 +435,21 @@ struct ContentView: View {
                         .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
+            Text("Which part of the picture").font(.subheadline.weight(.semibold)).padding(.top, 6)
+            Group {
+                plainSlider("Zoom in", value: $model.cropZoom, range: 1...3, format: "%.1f×")
+                plainSlider("Left / right", value: $model.cropShiftX, range: -1...1, format: "%+.2f")
+                plainSlider("Up / down", value: $model.cropShiftY, range: -1...1, format: "%+.2f")
+            }
+            .disabled(model.framing != .fill)
+            Text(model.framing == .fill ? "The white outline in the corner view shows the part other apps get."
+                                        : "Turn off “Show the whole picture with black bars” under Advanced to crop.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
     @ViewBuilder private var emptyRoom: some View {
-        section("2", "Empty room", "Record the room with nobody in it. DepthWire then hides the room, so only people and things that weren't there show up. Works in the dark.") {
+        section("2", "Calibrate empty room", "Show DepthWire the room with nobody in it. It then hides the room, so only people and things that weren't there show up. Works in the dark.") {
             HStack {
                 Button(action: model.recordEmptyRoom) {
                     Text(recordTitle).frame(maxWidth: .infinity)
@@ -449,6 +458,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(recordBusy)
                 Button("Clear") { model.clearEmptyRoom() }
+                    .help("Forgets the calibration and shows the whole room again.")
                     .controlSize(.large)
                     .disabled(model.roomState != .ready)
             }
@@ -478,18 +488,18 @@ struct ContentView: View {
 
     private var recordTitle: String {
         switch model.roomState {
-        case .none: return "Record empty room"
+        case .none: return "Calibrate empty room"
         case .countdown(let n): return "Step out of view… \(n)"
-        case .recording(let percent): return "Recording… \(percent)%"
-        case .ready: return "Record empty room again"
+        case .recording(let percent): return "Calibrating… \(percent)%"
+        case .ready: return "Calibrate again"
         }
     }
 
     private var roomCaption: String {
         switch model.roomState {
-        case .none: return "Nothing recorded yet. You get 3 seconds to step out of view."
+        case .none: return "Not calibrated yet. You get 3 seconds to step out of view."
         case .countdown, .recording: return "Stay out of view until it finishes."
-        case .ready: return "Recorded and saved. Record again if the phone or the furniture moves."
+        case .ready: return "Calibrated and saved. Calibrate again if the phone or the furniture moves."
         }
     }
 
@@ -499,40 +509,20 @@ struct ContentView: View {
                 ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            Picker("Fit", selection: $model.framing) {
-                Text("Whole picture").tag(DepthRenderer.Framing.fit)
-                Text("Fill the frame").tag(DepthRenderer.Framing.fill)
-            }
-            .pickerStyle(.segmented)
             Toggle("Give each person their own color", isOn: $model.playerColors)
                 .disabled(!model.hideRoom)
-        }
-    }
-
-    @ViewBuilder private var extras: some View {
-        DisclosureGroup("Crop and corner view (optional)", isExpanded: $showExtras) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Choose which part of the phone's picture other apps get. The white outline in the corner view shows it.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Group {
-                    plainSlider("Zoom in", value: $model.cropZoom, range: 1...3, format: "%.1f×")
-                    plainSlider("Left / right", value: $model.cropShiftX, range: -1...1, format: "%+.2f")
-                    plainSlider("Up / down", value: $model.cropShiftY, range: -1...1, format: "%+.2f")
-                }
-                .disabled(model.framing != .fill)
-                if model.framing != .fill {
-                    Text("Cropping needs Fit set to “Fill the frame”.").font(.caption).foregroundStyle(.secondary)
-                }
-                Toggle("Show everything the phone sees in the corner", isOn: $model.showOverview)
-                    .help("A small view of the phone's whole picture, with what's too near, too far or hidden marked. Other apps never see it.")
-            }
-            .padding(.top, 8)
         }
     }
 
     @ViewBuilder private var advanced: some View {
         DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
             VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show everything the phone sees in the corner", isOn: $model.showOverview)
+                    .help("A small view of the phone's whole picture, with what's too near, too far or hidden marked. Other apps never see it.")
+                Toggle("Show the whole picture with black bars", isOn: Binding(
+                    get: { model.framing == .fit }, set: { model.framing = $0 ? .fit : .fill }))
+                    .help("Other apps get the phone's whole picture with black bars at the sides, instead of a cropped picture that fills the frame.")
+                Divider()
                 Picker("Noise filter", selection: $model.minConfidence) {
                     ForEach(DepthPreprocessor.ConfidenceLevel.allCases) { Text($0.label).tag($0) }
                 }
