@@ -47,9 +47,7 @@ The iPhone app isn't on the App Store yet. For now, [build it with Xcode](docs/d
 
 ## 3 · Set up the room
 
-<table><tr>
-<td width="270"><img src="media/calibrate.gif" width="250" alt="Calibrating: the room disappears from the depth picture"></td>
-<td>
+<p align="center"><img src="media/app-calibrate.gif" width="760" alt="DepthWire for Mac: the countdown, calibrating, the room disappearing, then a person walking in as the only thing visible"></p>
 
 1. **Place the phone** on the tripod, low, facing the people. Don't move it again.
 2. **Calibrate.** Press the button and step out for 3 seconds. The room disappears.
@@ -58,9 +56,6 @@ The iPhone app isn't on the App Store yet. For now, [build it with Xcode](docs/d
 It works in the dark.
 
 → [Room setup guide](guide/room-setup.md)
-
-</td>
-</tr></table>
 
 ## 4 · Make visuals
 
