@@ -1,0 +1,8 @@
+// Copy this file to Signing.xcconfig (same folder) and fill in your own values.
+// Signing.xcconfig is gitignored, so your team ID never ends up in a commit.
+
+// Your Apple Developer Team ID (developer.apple.com → Membership details).
+DEVELOPMENT_TEAM = XXXXXXXXXX
+
+// A reverse-domain prefix you own. The apps become <prefix>.depthwire.ios and <prefix>.depthwire.mac.
+BUNDLE_ID_PREFIX = com.example

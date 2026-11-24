@@ -1,0 +1,123 @@
+import Foundation
+import Network
+
+/// Finds the iPhone over Bonjour (Wi-Fi or peer-to-peer) and reads depth frames.
+final class DepthReceiver {
+    let queue = DispatchQueue(label: "depthwire.receiver", qos: .userInteractive)
+
+    /// One received frame; planes are `width * height`, see `DepthWireProtocol`.
+    struct Frame {
+        var depth: Data          // UInt16 millimeters, 0 = no reading
+        var confidence: Data?    // UInt8 0 low, 1 medium, 2 high
+        var personMask: Data?    // UInt8, 255 = person
+        var camera: DepthWireProtocol.CameraInfo? // the phone's lens and which way is down
+        var width: Int
+        var height: Int
+    }
+
+    /// Called on `queue`.
+    var onFrame: ((Frame) -> Void)?
+    /// Called on `queue`.
+    var onStatus: ((String) -> Void)?
+
+    private var browser: NWBrowser?
+    private var connection: NWConnection?
+
+    func start() {
+        queue.async { [self] in
+            let params = NWParameters.tcp
+            params.includePeerToPeer = true
+            let browser = NWBrowser(for: .bonjour(type: DepthWireProtocol.serviceType, domain: nil), using: params)
+            browser.browseResultsChangedHandler = { [weak self] results, _ in self?.connectIfNeeded(results) }
+            browser.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .failed(let error):
+                    self?.onStatus?("Bonjour failed: \(error)")
+                case .waiting(let error):
+                    // Typically "PolicyDenied" when Local Network access is off for this app.
+                    self?.onStatus?("Bonjour blocked: \(error) — allow DepthWire under Privacy & Security → Local Network")
+                default:
+                    break
+                }
+            }
+            browser.start(queue: queue)
+            self.browser = browser
+            onStatus?("Looking for iPhone… (press Stream on the phone)")
+        }
+    }
+
+    private func connectIfNeeded(_ results: Set<NWBrowser.Result>) {
+        guard connection == nil, let result = results.first else { return }
+
+        let params = NWParameters.tcp
+        params.includePeerToPeer = true
+        let connection = NWConnection(to: result.endpoint, using: params)
+        self.connection = connection
+
+        var name = "iPhone"
+        if case .service(let serviceName, _, _, _) = result.endpoint { name = serviceName }
+
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self, let connection else { return }
+            switch state {
+            case .ready:
+                self.onStatus?("Connected to \(name)")
+                self.receiveHeader(on: connection)
+            case .waiting:
+                connection.cancel()
+            case .failed, .cancelled:
+                guard self.connection === connection else { return }
+                self.connection = nil
+                self.onStatus?("Looking for iPhone… (press Stream on the phone)")
+                self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, let results = self.browser?.browseResults else { return }
+                    self.connectIfNeeded(results)
+                }
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    private func receiveHeader(on connection: NWConnection) {
+        let size = DepthWireProtocol.headerSize
+        connection.receive(minimumIncompleteLength: size, maximumLength: size) { [weak self] data, _, _, error in
+            guard let self, error == nil, let data, let header = DepthWireProtocol.Header(data),
+                  header.compressedLength > 0 else {
+                connection.cancel()
+                return
+            }
+            self.receivePayload(header, on: connection)
+        }
+    }
+
+    private func receivePayload(_ header: DepthWireProtocol.Header, on connection: NWConnection) {
+        let length = Int(header.compressedLength)
+        connection.receive(minimumIncompleteLength: length, maximumLength: length) { [weak self] data, _, _, error in
+            guard let self, error == nil, let data, data.count == length else {
+                connection.cancel()
+                return
+            }
+            let width = Int(header.width)
+            let height = Int(header.height)
+            let pixels = width * height
+            if Int(header.rawLength) == header.expectedRawLength,
+               let raw = DepthWireProtocol.decompress(data, rawLength: Int(header.rawLength)) {
+                var offset = raw.startIndex
+                func plane(_ bytes: Int) -> Data {
+                    defer { offset += bytes }
+                    return Data(raw[offset..<(offset + bytes)])
+                }
+                let depth = plane(pixels * 2)
+                let confidence = header.flags.contains(.confidence) ? plane(pixels) : nil
+                let mask = header.flags.contains(.personMask) ? plane(pixels) : nil
+                let camera = header.flags.contains(.camera)
+                    ? DepthWireProtocol.CameraInfo(plane(DepthWireProtocol.CameraInfo.byteCount)) : nil
+                self.onFrame?(Frame(depth: depth, confidence: confidence, personMask: mask, camera: camera,
+                                    width: width, height: height))
+            }
+            self.receiveHeader(on: connection)
+        }
+    }
+}
