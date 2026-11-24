@@ -22,6 +22,13 @@ enum IsolateMode {
     case depth   // the recorded empty room, subtracted from the LiDAR depth; works in the dark
 }
 
+/// Why the picture is empty although depth is arriving, so black never reads as "no signal".
+enum EmptyReason: Equatable {
+    case tooFar    // everything is beyond Farthest
+    case tooNear   // everything is closer than Nearest
+    case hidden    // the room is hidden and nobody is in view
+}
+
 /// Where the empty-room recording stands, for the button and its caption.
 enum RoomState: Equatable {
     case none
@@ -86,6 +93,7 @@ final class AppModel: ObservableObject {
     @Published var minConfidence = DepthPreprocessor.ConfidenceLevel(rawValue: Int(Saved.double("confidence", 0))) ?? .all { didSet { changed("confidence", Double(minConfidence.rawValue)) } }
     @Published var smoothing = Saved.double("smoothing", 0) { didSet { changed("smoothing", smoothing) } }
     @Published var roomState = RoomState.none
+    @Published var emptyReason: EmptyReason?
     @Published var crop = CropSettings.load() { didSet { crop.save(); pushSettings() } }
     /// A sample of what the phone sees, in room feet, for the crop-box plots.
     @Published var cropPoints = [SIMD3<Float>]()
@@ -105,6 +113,8 @@ final class AppModel: ObservableObject {
     private var queueAutoRange = false
     private var queueIsolate: IsolateMode = .off
     private var queueOverview = true
+    private var lastEmptyReason: EmptyReason?
+    private var emptyStreak = 0
     private var lastBackgroundState = DepthSegmenter.BackgroundState.none
     private let sink = VirtualCameraSink()
     private var lastSinkAttempt: CFAbsoluteTime = 0
@@ -285,6 +295,36 @@ final class AppModel: ObservableObject {
         }
         let autoRangeMeters = queueAutoRange ? (autoRanger.nearMeters, autoRanger.farMeters) : nil
 
+        // Is anything actually being shown? Sampled, and held for half a second so it doesn't flicker.
+        var emptyChanged: EmptyReason??
+        if wantsPreview {
+            let near = UInt16(max(0, min(65535, renderer.nearMeters * 1000))), far = UInt16(max(0, min(65535, renderer.farMeters * 1000)))
+            var valid = 0, inRange = 0, beyond = 0, shown = 0
+            millimeters.withUnsafeBytes { raw in
+                let depth = raw.bindMemory(to: UInt16.self)
+                var i = 0
+                while i < width * height {
+                    let mm = UInt16(littleEndian: depth[i])
+                    if mm > 0 {
+                        valid += 1
+                        if mm > far { beyond += 1 } else if mm >= near {
+                            inRange += 1
+                            if labels == nil || labels![i] != 0 { shown += 1 }
+                        }
+                    }
+                    i += 4
+                }
+            }
+            var reason: EmptyReason?
+            if valid > width * height / 80 {              // the phone is seeing something
+                if inRange * 50 < valid { reason = beyond * 2 >= valid - inRange ? .tooFar : .tooNear }
+                else if labels != nil, shown * 200 < valid { reason = .hidden }
+            }
+            emptyStreak = reason == lastEmptyReason ? emptyStreak + 1 : 0
+            lastEmptyReason = reason
+            if emptyStreak == 10 || (reason == nil && emptyStreak == 0) { emptyChanged = .some(reason) }
+        }
+
         // the corner view: the phone's whole picture, with what's being left out marked
         var rawPreview: CGImage?
         if wantsPreview, queueOverview {
@@ -307,6 +347,7 @@ final class AppModel: ObservableObject {
             if wantsPreview { lastPreview = now }
             DispatchQueue.main.async {
                 if let preview { self.preview = preview }
+                if let emptyChanged, self.emptyReason != emptyChanged { self.emptyReason = emptyChanged }
                 if wantsPreview {
                     self.cropPoints = points
                     if hiding { if let rawPreview { self.rawPreview = rawPreview } } else if self.rawPreview != nil { self.rawPreview = nil }
@@ -406,6 +447,7 @@ struct ContentView: View {
         .overlay(alignment: .topTrailing) {
             if model.fps > 0 { badge(String(format: "%.0f fps", model.fps), symbol: nil) }
         }
+        .overlay { emptyHint }
         .overlay {
             if case .countdown(let n) = model.roomState {
                 Text("Step out of view… \(n)").font(.largeTitle.bold()).foregroundStyle(.white)
@@ -416,6 +458,43 @@ struct ContentView: View {
                         Text("Calibrating the empty room").font(.headline).foregroundStyle(.white)
                             .padding(8).background(.red, in: Capsule()).padding(12)
                     }
+            }
+        }
+    }
+
+    /// Says why the picture is black when depth is arriving, and offers the fix.
+    @ViewBuilder private var emptyHint: some View {
+        if model.roomState == .none || model.roomState == .ready, model.link != .searching, let reason = model.emptyReason {
+            switch reason {
+            case .tooFar, .tooNear:
+                VStack(spacing: 10) {
+                    Label("Nothing in range", systemImage: "ruler").font(.title3.bold())
+                    Text(reason == .tooFar
+                         ? String(format: "The phone is sending depth, but everything it sees is farther than Farthest (%.1f m).", model.farMeters)
+                         : String(format: "The phone is sending depth, but everything it sees is nearer than Nearest (%.1f m).", model.nearMeters))
+                        .font(.callout).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    Button("Show the whole room") { model.autoRange = false; model.nearMeters = 0; model.farMeters = 10 }
+                        .buttonStyle(.borderedProminent)
+                }
+                .foregroundStyle(.white)
+                .padding(18).frame(maxWidth: 330)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.2)))
+                // clear of the corner view, which sits bottom right
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 54).padding(.leading, 22)
+            case .hidden:
+                VStack {
+                    Spacer()
+                    HStack {
+                        Label("Room hidden. Nobody in view.", systemImage: "person.slash")
+                            .font(.callout).foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(.black.opacity(0.65), in: Capsule())
+                        Spacer()
+                    }
+                }
+                .padding(12)
             }
         }
     }
