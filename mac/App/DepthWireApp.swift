@@ -81,10 +81,10 @@ final class AppModel: ObservableObject {
     /// Find people with the phone's color camera instead of the recorded room. Needs light.
     @Published var peopleFromCamera = Saved.bool("peopleFromCamera", false) { didSet { changed("peopleFromCamera", peopleFromCamera) } }
     @Published var playerColors = Saved.bool("playerColors", false) { didSet { changed("playerColors", playerColors) } }
-    @Published var thresholdCentimeters = Saved.double("threshold", 15) { didSet { changed("threshold", thresholdCentimeters) } }
-    @Published var adaptBackground = Saved.bool("adapt", true) { didSet { changed("adapt", adaptBackground) } }
-    @Published var minConfidence = DepthPreprocessor.ConfidenceLevel(rawValue: Int(Saved.double("confidence", 1))) ?? .medium { didSet { changed("confidence", Double(minConfidence.rawValue)) } }
-    @Published var smoothing = Saved.double("smoothing", 0.15) { didSet { changed("smoothing", smoothing) } }
+    @Published var thresholdCentimeters = Saved.double("threshold", 3) { didSet { changed("threshold", thresholdCentimeters) } }
+    @Published var adaptBackground = Saved.bool("adapt", false) { didSet { changed("adapt", adaptBackground) } }
+    @Published var minConfidence = DepthPreprocessor.ConfidenceLevel(rawValue: Int(Saved.double("confidence", 0))) ?? .all { didSet { changed("confidence", Double(minConfidence.rawValue)) } }
+    @Published var smoothing = Saved.double("smoothing", 0) { didSet { changed("smoothing", smoothing) } }
     @Published var roomState = RoomState.none
     @Published var crop = CropSettings.load() { didSet { crop.save(); pushSettings() } }
     /// A sample of what the phone sees, in room feet, for the crop-box plots.
@@ -178,8 +178,8 @@ final class AppModel: ObservableObject {
         cropZoom = 1; cropShiftX = 0; cropShiftY = 0; showOverview = true
         flipX = false; flipY = false; sizeIndex = 0
         hideRoom = false; peopleFromCamera = false; playerColors = false
-        thresholdCentimeters = 15; adaptBackground = true
-        minConfidence = .medium; smoothing = 0.15
+        thresholdCentimeters = 3; adaptBackground = false
+        minConfidence = .all; smoothing = 0
         crop = CropSettings()
     }
 
