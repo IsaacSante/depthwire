@@ -148,8 +148,11 @@ final class AppModel: ObservableObject {
     /// Forgets the recorded empty room and shows everything again.
     func clearEmptyRoom() {
         hideRoom = false
+        // say so straight away: waiting for the next frame left it reading "Calibrated" with no phone connected
+        roomState = .none
         receiver.queue.async { [self] in
             segmenter.clearBackground()
+            lastBackgroundState = .none
             try? FileManager.default.removeItem(at: Self.roomFile)
         }
     }
