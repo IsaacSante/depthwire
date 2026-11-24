@@ -1,7 +1,6 @@
 <h1 align="center">DepthWire</h1>
 
-<p align="center">An iPhone app and a Mac app that send the iPhone's LiDAR depth to your Mac as a camera,<br>
-for interactive installs in TouchDesigner or any app that takes a camera.</p>
+<p align="center">Use an iPhone's LiDAR as a depth camera on your Mac, for interactive installs.</p>
 
 <p align="center">
   <img src="media/hero-apps.png" width="820" alt="DepthWire on a MacBook receiving depth from DepthWire on an iPhone">
