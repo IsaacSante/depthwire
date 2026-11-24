@@ -20,7 +20,12 @@ final class DepthRenderer {
 
     var nearMeters: Float = 0.2
     var farMeters: Float = 5.0
-    var framing: Framing = .fit
+    var framing: Framing = .fill
+    /// Fill only: which frame-shaped part of the phone's picture is kept. Zoom 1 is the biggest
+    /// part that fits, 2 half as wide; the shifts slide it across what's left, -1…1 (0 centred, +y down).
+    var cropZoom: Float = 1
+    var cropShiftX: Float = 0
+    var cropShiftY: Float = 0
     /// With player labels: tint each player its own color instead of the depth palette.
     var playerColors = false
     var palette: Palette = .turbo {
@@ -39,6 +44,28 @@ final class DepthRenderer {
             kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
         ]
         CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool)
+    }
+
+    /// The part of a `width`×`height` depth picture that Fill keeps, in its pixels.
+    static func cropRect(width: Int, height: Int, zoom: Float, shiftX: Float, shiftY: Float) -> (x: Int, y: Int, w: Int, h: Int) {
+        let outWidth = Double(CameraConstants.output.width), outHeight = Double(CameraConstants.output.height)
+        let fillScale = max(outWidth / Double(width), outHeight / Double(height)) * Double(max(zoom, 1))
+        let w = max(2, min(width, Int((outWidth / fillScale).rounded())))
+        let h = max(2, min(height, Int((outHeight / fillScale).rounded())))
+        let x = Int((Double(width - w) / 2 * Double(1 + min(max(shiftX, -1), 1))).rounded())
+        let y = Int((Double(height - h) / 2 * Double(1 + min(max(shiftY, -1), 1))).rounded())
+        return (x, y, w, h)
+    }
+
+    /// The phone's whole picture for setting up, never sent to other apps: in range in the palette,
+    /// too near hatched red, too far hatched blue, the hidden room hatched grey, no reading black.
+    func overview(millimeters: Data, labels: [UInt8]?, width: Int, height: Int) -> CGImage? {
+        colorize(millimeters, labels: labels, width: width, height: height, markers: true)
+        guard let provider = CGDataProvider(data: Data(small) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
     /// Returns the final camera frame and, if asked, a CGImage of that same frame.
@@ -76,10 +103,9 @@ final class DepthRenderer {
                 dst = vImage_Buffer(data: base + y * rowBytes + x * 4, height: vImagePixelCount(h),
                                     width: vImagePixelCount(w), rowBytes: rowBytes)
             case .fill:
-                // Centered crop of the source into the whole output.
-                let w = min(width, Int((Double(outWidth) / fillScale).rounded()))
-                let h = min(height, Int((Double(outHeight) / fillScale).rounded()))
-                let x = (width - w) / 2, y = (height - h) / 2
+                // A frame-shaped crop of the source into the whole output.
+                _ = fillScale
+                let (x, y, w, h) = Self.cropRect(width: width, height: height, zoom: cropZoom, shiftX: cropShiftX, shiftY: cropShiftY)
                 src = vImage_Buffer(data: smallBytes.baseAddress! + (y * width + x) * 4, height: vImagePixelCount(h),
                                     width: vImagePixelCount(w), rowBytes: width * 4)
                 dst = whole
@@ -102,7 +128,7 @@ final class DepthRenderer {
     }
 
     /// Fills `small` with BGRA colors at the depth map's own resolution.
-    private func colorize(_ millimeters: Data, labels: [UInt8]?, width: Int, height: Int) {
+    private func colorize(_ millimeters: Data, labels: [UInt8]?, width: Int, height: Int, markers: Bool = false) {
         let count = width * height
         if small.count != count * 4 { small = [UInt8](repeating: 255, count: count * 4) }
 
@@ -119,8 +145,15 @@ final class DepthRenderer {
                         let mm = Float(UInt16(littleEndian: src[i]))
                         let color: UInt32
                         let player = labels?[i] ?? 0
-                        if mm == 0 || (labels != nil && player == 0) {
-                            color = 0xFF00_0000 // no reading or background: black
+                        // diagonal stripes for what's being left out, in the setup overview only
+                        let stripe: Float = markers && ((i % width + i / width) / 3) % 2 == 0 ? 1 : 0.6
+                        if mm == 0 {
+                            color = 0xFF00_0000 // no reading: black
+                        } else if mm < near || mm > far {
+                            // outside the chosen distances: empty for other apps
+                            color = !markers ? 0xFF00_0000 : Self.shade(mm < near ? 0xC0262A : 0x2A46B8, by: stripe)
+                        } else if labels != nil && player == 0 {
+                            color = !markers ? 0xFF00_0000 : Self.shade(0x4A4A4A, by: stripe) // the hidden room
                         } else if tintPlayers {
                             // Player hue, brighter when nearer.
                             let nearness = (far - min(max(mm, near), far)) / (far - near)

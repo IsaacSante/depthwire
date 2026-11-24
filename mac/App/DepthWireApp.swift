@@ -48,7 +48,7 @@ final class AppModel: ObservableObject {
     @Published var cameraStatus = "Waiting for camera extension"
     /// What the virtual camera is sending to other apps.
     @Published var preview: CGImage?
-    /// Everything the phone sees, shown in the corner while the empty room is hidden.
+    /// The phone's whole picture with what's being left out marked, for the corner view.
     @Published var rawPreview: CGImage?
     @Published var fps: Double = 0
     /// Size of the depth frames arriving from the phone (already rotated upright).
@@ -62,7 +62,12 @@ final class AppModel: ObservableObject {
     /// The range auto mode is currently using, for display.
     @Published var autoRangeMeters: (near: Float, far: Float)?
     @Published var palette = DepthRenderer.Palette(rawValue: Saved.string("palette")) ?? .turbo { didSet { changed("palette", palette.rawValue) } }
-    @Published var framing = DepthRenderer.Framing(rawValue: Saved.string("framing")) ?? .fit { didSet { changed("framing", framing.rawValue) } }
+    @Published var framing = DepthRenderer.Framing(rawValue: Saved.string("framing")) ?? .fill { didSet { changed("framing", framing.rawValue) } }
+    @Published var cropZoom = Saved.double("cropZoom", 1) { didSet { changed("cropZoom", cropZoom) } }
+    @Published var cropShiftX = Saved.double("cropShiftX", 0) { didSet { changed("cropShiftX", cropShiftX) } }
+    @Published var cropShiftY = Saved.double("cropShiftY", 0) { didSet { changed("cropShiftY", cropShiftY) } }
+    /// Show the phone's whole picture in the corner while setting up.
+    @Published var showOverview = Saved.bool("showOverview", true) { didSet { changed("showOverview", showOverview) } }
     /// Show only what isn't part of the recorded empty room.
     @Published var hideRoom = Saved.bool("hideRoom", false) { didSet { changed("hideRoom", hideRoom) } }
     /// Find people with the phone's color camera instead of the recorded room. Needs light.
@@ -91,6 +96,7 @@ final class AppModel: ObservableObject {
     private let depthCrop = DepthCrop()
     private var queueAutoRange = false
     private var queueIsolate: IsolateMode = .off
+    private var queueOverview = true
     private var lastBackgroundState = DepthSegmenter.BackgroundState.none
     private let sink = VirtualCameraSink()
     private var lastSinkAttempt: CFAbsoluteTime = 0
@@ -151,7 +157,8 @@ final class AppModel: ObservableObject {
     /// Every setting back to how the app first opens. The recorded room is kept.
     func resetToDefaults() {
         nearMeters = 0.2; farMeters = 5.0; autoRange = false
-        palette = .turbo; framing = .fit
+        palette = .turbo; framing = .fill
+        cropZoom = 1; cropShiftX = 0; cropShiftY = 0; showOverview = true
         hideRoom = false; peopleFromCamera = false; playerColors = false
         thresholdCentimeters = 15; adaptBackground = true
         minConfidence = .medium; smoothing = 0.5
@@ -173,7 +180,10 @@ final class AppModel: ObservableObject {
         let playerColors = playerColors, threshold = Int(thresholdCentimeters * 10)
         let adapt = adaptBackground, minConfidence = minConfidence, smoothing = Float(smoothing)
         let crop = crop
+        let zoom = Float(cropZoom), shiftX = Float(cropShiftX), shiftY = Float(cropShiftY), overview = showOverview
         receiver.queue.async { [self] in
+            renderer.cropZoom = zoom; renderer.cropShiftX = shiftX; renderer.cropShiftY = shiftY
+            queueOverview = overview
             queueIsolate = isolate
             queueAutoRange = autoRange
             segmenter.thresholdMillimeters = threshold
@@ -255,12 +265,12 @@ final class AppModel: ObservableObject {
         }
         let autoRangeMeters = queueAutoRange ? (autoRanger.nearMeters, autoRanger.farMeters) : nil
 
-        // the corner view: everything the phone sees, while the main view hides the room
+        // the corner view: the phone's whole picture, with what's being left out marked
         var rawPreview: CGImage?
-        if wantsPreview, labels != nil {
-            rawPreview = renderer.render(millimeters: millimeters, labels: nil, width: width, height: height, makePreview: true).1
+        if wantsPreview, queueOverview {
+            rawPreview = renderer.overview(millimeters: millimeters, labels: labels, width: width, height: height)
         }
-        let hiding = labels != nil
+        let hiding = queueOverview
         let (pixelBuffer, preview) = renderer.render(millimeters: millimeters, labels: labels, width: width,
                                                      height: height, makePreview: wantsPreview)
         if let pixelBuffer { sink.enqueue(pixelBuffer) }
@@ -300,6 +310,7 @@ final class AppModel: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("showAdvanced") private var showAdvanced = false
+    @AppStorage("showExtras") private var showExtras = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
@@ -314,6 +325,7 @@ struct ContentView: View {
                     distance
                     emptyRoom
                     look
+                    extras
                     advanced
                     Button("Reset to defaults") { model.resetToDefaults() }
                         .help("Puts every setting back to how DepthWire first opens. Your recorded empty room is kept.")
@@ -341,13 +353,26 @@ struct ContentView: View {
         .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height),
                      contentMode: .fit)
         .overlay(alignment: .bottomTrailing) {
-            if let raw = model.rawPreview {
+            if model.showOverview, let raw = model.rawPreview {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Everything the phone sees").font(.caption2).foregroundStyle(.white.opacity(0.85))
-                    Image(decorative: raw, scale: 1).resizable()
-                        .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height), contentMode: .fit)
-                        .frame(width: 210)
-                        .overlay(Rectangle().strokeBorder(.white.opacity(0.8)))
+                    Text("Everything the phone sees").font(.caption2).foregroundStyle(.white.opacity(0.9))
+                    Image(decorative: raw, scale: 1).interpolation(.none).resizable()
+                        .aspectRatio(CGFloat(raw.width) / CGFloat(raw.height), contentMode: .fit)
+                        .frame(width: raw.width >= raw.height ? 220 : 130)
+                        .overlay {
+                            // the part other apps get
+                            if model.framing == .fill {
+                                GeometryReader { geo in
+                                    let r = DepthRenderer.cropRect(width: raw.width, height: raw.height, zoom: Float(model.cropZoom),
+                                                                   shiftX: Float(model.cropShiftX), shiftY: Float(model.cropShiftY))
+                                    let k = geo.size.width / CGFloat(raw.width)
+                                    Rectangle().strokeBorder(.white, lineWidth: 1.5)
+                                        .frame(width: CGFloat(r.w) * k, height: CGFloat(r.h) * k)
+                                        .offset(x: CGFloat(r.x) * k, y: CGFloat(r.y) * k)
+                                }
+                            }
+                        }
+                    Text("Red: too near · Blue: too far · Grey: hidden room").font(.system(size: 9)).foregroundStyle(.white.opacity(0.75))
                 }
                 .padding(6)
                 .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
@@ -397,7 +422,7 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("1", "Distance", "Only things between these two distances from the phone are shown. Near is warm, far is cool.") {
+        section("1", "Distance", "Only things between these two distances from the phone are shown. Anything nearer or farther is left out.") {
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
@@ -481,6 +506,27 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             Toggle("Give each person their own color", isOn: $model.playerColors)
                 .disabled(!model.hideRoom)
+        }
+    }
+
+    @ViewBuilder private var extras: some View {
+        DisclosureGroup("Crop and corner view (optional)", isExpanded: $showExtras) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Choose which part of the phone's picture other apps get. The white outline in the corner view shows it.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Group {
+                    plainSlider("Zoom in", value: $model.cropZoom, range: 1...3, format: "%.1f×")
+                    plainSlider("Left / right", value: $model.cropShiftX, range: -1...1, format: "%+.2f")
+                    plainSlider("Up / down", value: $model.cropShiftY, range: -1...1, format: "%+.2f")
+                }
+                .disabled(model.framing != .fill)
+                if model.framing != .fill {
+                    Text("Cropping needs Fit set to “Fill the frame”.").font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Show everything the phone sees in the corner", isOn: $model.showOverview)
+                    .help("A small view of the phone's whole picture, with what's too near, too far or hidden marked. Other apps never see it.")
+            }
+            .padding(.top, 8)
         }
     }
 
@@ -572,6 +618,15 @@ struct ContentView: View {
             Text(label).frame(width: 84, alignment: .leading)
             Slider(value: value, in: range)
             Text(String(format: "%.1f m", value.wrappedValue))
+                .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
+        }
+    }
+
+    private func plainSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, format: String) -> some View {
+        HStack {
+            Text(label).frame(width: 84, alignment: .leading)
+            Slider(value: value, in: range)
+            Text(String(format: format, value.wrappedValue))
                 .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
         }
     }
