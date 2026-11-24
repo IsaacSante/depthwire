@@ -1,8 +1,14 @@
 # DepthWire
 
-Use your iPhone's LiDAR as a depth camera on your Mac. No Kinect needed.
+**Make interactive installs with the phone you already have.**
 
-Your phone streams depth to your Mac, and it shows up as a camera called **DepthWire** in TouchDesigner, OBS, Zoom or any other app.
+DepthWire is a toolkit for building installations that react to people, using an iPhone's LiDAR in place of a Kinect or an Orbbec. It covers the whole chain: the apps, the gear, setting up a room, and starting points for visuals.
+
+```
+iPhone (LiDAR)  →  Mac (DepthWire)  →  TouchDesigner or any app  →  projector
+```
+
+It came out of a real install: a phone on a tripod, a laptop, a used projector, and a wall that moved when people did.
 
 ## Download
 
@@ -11,32 +17,28 @@ Your phone streams depth to your Mac, and it shows up as a camera called **Depth
 | **Mac app** | **[Download DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases)** (macOS 14 or later) |
 | **iPhone app** | Coming to the App Store. Until then, [build it from this repo](#build-from-source). |
 
-You need both: the iPhone app sends the depth, the Mac app receives it.
-The iPhone must have LiDAR: an iPhone 12 Pro or any later Pro model.
+You need both: the iPhone sends the depth, the Mac receives it.
+
+## The toolkit
+
+| Step | | What's there |
+|---|---|---|
+| 1 | **[What you need](guide/gear.md)** | The gear list: phone, Mac, projector, and the adapters and cable for long shows, with models and prices. |
+| 2 | **[Get the apps talking](#get-started)** | Install both apps and see depth arrive. Four steps. |
+| 3 | **[Set up the room](guide/room-setup.md)** | Where to put the phone, calibrating the empty room, choosing the area. |
+| 4 | **[Make visuals](touchdesigner/)** | TouchDesigner starters you can paste in and build on. |
+| 5 | **[Run a show](guide/run-a-show.md)** | Wi-Fi or cable, keeping the phone alive all night, and a checklist before the doors open. |
 
 ## Get started
+
+You need an iPhone with LiDAR: an iPhone 12 Pro or any later Pro model.
 
 1. **Mac:** open the download and drag DepthWire into Applications. Open it, and approve its camera when macOS asks (System Settings → General → Login Items & Extensions → Camera Extensions).
 2. **iPhone:** open DepthWire, on the same Wi-Fi as your Mac. It starts sending by itself.
 3. **Mac:** the banner at the top turns green, "Receiving depth from iPhone".
 4. **Any app:** choose **DepthWire** as the camera.
 
-Something not working? See [Troubleshooting](#troubleshooting).
-
-## Set it up for your room
-
-In the Mac app:
-
-1. **Calibrate.** Press Calibrate and step out of view for 3 seconds. DepthWire learns the empty room, then shows only people. It works in the dark.
-2. **Choose the area.** Set the nearest and farthest distance to look at. Everything else is ignored.
-3. **Set the output.** Rainbow or Grayscale, the picture size, and flip left-right or up-down.
-
-## Use it in TouchDesigner
-
-1. In DepthWire, set Colors to **Grayscale**.
-2. In TouchDesigner, add a **Video Device In TOP** and pick **DepthWire**.
-
-You get people in grey on black: white is near, dark is far. Use it as a mask or a depth map.
+In TouchDesigner that's a **Video Device In TOP** with DepthWire picked. Set Colors to **Grayscale** in DepthWire, and you get people in grey on black: white is near, dark is far.
 
 ## Troubleshooting
 
@@ -44,7 +46,8 @@ You get people in grey on black: white is near, dark is far. Use it as a mask or
 - **"Waiting for camera extension"** after you approved it. Quit DepthWire on the Mac and open it again.
 - **"Bonjour blocked".** Allow DepthWire under System Settings → Privacy & Security → Local Network.
 - **Movement leaves a trail.** Open Advanced and lower Steadiness.
-- **Long shows.** Wi-Fi works, but a cable is steadier: a USB-C Ethernet adapter on the phone and one on the Mac.
+
+More in [Run a show](guide/run-a-show.md).
 
 ---
 
@@ -68,17 +71,21 @@ cd mac && xcodegen generate
 
 Open `ios/DepthWire.xcodeproj` and run it on your phone. Open `mac/DepthWire.xcodeproj`, build, and copy the app to /Applications before launching: macOS only activates camera extensions from there.
 
-## How it works
+## What's in the repo
 
 | Folder | What's in it |
 |---|---|
+| [`guide/`](guide) | The gear list, room setup and show notes. |
+| [`touchdesigner/`](touchdesigner) | Starter scripts for visuals. |
 | [`ios/`](ios) | The iPhone app: reads LiDAR depth and sends it. |
 | [`mac/`](mac) | The Mac app and its camera extension. |
 | [`Shared/`](Shared) | The wire format, one file compiled into both apps. |
 
+How the apps work, briefly:
+
 - The phone sends 16-bit depth in millimetres, up to 320×240, LZ4-compressed over TCP. The Mac finds it with Bonjour (`_depthwire._tcp`).
 - Each frame also carries the lens and which way is down, so the Mac can place every pixel in the room.
-- The Mac hides the calibrated room, keeps the chosen distances, colours the result and feeds it to the virtual camera.
+- The Mac hides the calibrated room, keeps the chosen distances, colours the result and feeds it to a virtual camera.
 - A virtual camera is 8-bit. In Grayscale that is 256 steps across your range: `distance = Farthest − brightness × (Farthest − Nearest)`.
 
 ## Roadmap
@@ -86,6 +93,7 @@ Open `ios/DepthWire.xcodeproj` and run it on your phone. Open `mac/DepthWire.xco
 - [x] Mac download
 - [ ] iPhone app on the App Store
 - [ ] Full-precision depth output for TouchDesigner, Resolume and Unity
+- [ ] More TouchDesigner starters
 - [ ] No restart needed after approving the camera
 
 ## License
