@@ -342,9 +342,9 @@ struct ContentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    distance
                     emptyRoom
                     look
+                    distance
                     advanced
                     Button("Reset all settings") { model.resetToDefaults() }
                         .controlSize(.small)
@@ -471,7 +471,7 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("1", "Choose the area", "Tell the phone how near and how far to look. Everything outside that is ignored.") {
+        section("3", "Choose the area", "Tell the phone how near and how far to look. Everything outside that is ignored.") {
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
                 meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
@@ -503,7 +503,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var emptyRoom: some View {
-        section("2A", "Calibrate", "Step out, and DepthWire learns what the room looks like empty. After that it only shows people and things that weren't there. Works in the dark.", highlighted: true) {
+        section("1A", "Calibrate", "Step out, and DepthWire learns what the room looks like empty. After that it only shows people and things that weren't there. Works in the dark.", highlighted: true) {
             Button(action: model.recordEmptyRoom) {
                 Label(recordTitle, systemImage: recordBusy ? "hourglass" : "scope")
                     .font(.headline)
@@ -533,7 +533,7 @@ struct ContentView: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
         }
-        section("2B", "Reset calibration", "Forget the empty room and show everything again. Use this if you move the phone or change rooms.") {
+        section("1B", "Reset calibration", "Forget the empty room and show everything again. Use this if you move the phone or change rooms.") {
             Button(action: model.clearEmptyRoom) {
                 Label("Reset calibration", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)
@@ -572,7 +572,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var look: some View {
-        section("3", "Set the output", "What other apps get: the colors, the size, and which way round.") {
+        section("2", "Set the output", "What other apps get: the colors, the size, and which way round.") {
             Picker("Colors", selection: $model.palette) {
                 ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
             }
