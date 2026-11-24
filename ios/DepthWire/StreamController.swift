@@ -45,8 +45,9 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
     // Defaults suit a dark room, so nothing needs touching:
     // the LiDAR Camera (no tracking, holds up in the dark), holes filled (off left points
     // blinking in and out, which reads as movement; on is much steadier) and
-    // the fast mask. The "…4" key drops a fill-holes choice saved before this default.
-    @Published private(set) var depthSource = DepthSource(rawValue: UserDefaults.standard.string(forKey: "depthSource3") ?? "")
+    // the balanced mask. The "…4" key drops a fill-holes choice saved before this default, and
+    // "depthSource5" drops an ARKit choice saved before its picker was hidden.
+    @Published private(set) var depthSource = DepthSource(rawValue: UserDefaults.standard.string(forKey: "depthSource5") ?? "")
         ?? .lidarCamera
     /// LiDAR Camera only: let the camera fill holes and reduce noise. Off drops low-confidence points instead.
     @Published private(set) var fillHoles = UserDefaults.standard.object(forKey: "fillHoles4") as? Bool ?? true
@@ -171,7 +172,7 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
         guard source != depthSource else { return }
         stopDepthSource(depthSource)
         depthSource = source
-        UserDefaults.standard.set(source.rawValue, forKey: "depthSource3")
+        UserDefaults.standard.set(source.rawValue, forKey: "depthSource5")
         startDepthSource(source)
     }
 

@@ -70,6 +70,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// The ARKit depth source still works, but the choice is hidden to keep the screen simple:
+    /// the LiDAR Camera is the one that holds up in the dark. Set to true to bring the picker back.
+    private static let showsDepthSourcePicker = false
+
     private var statusText: some View {
         VStack(spacing: 6) {
             Label(controller.orientationName, systemImage: controller.orientationName.hasPrefix("Portrait")
@@ -80,19 +84,21 @@ struct ContentView: View {
             linkCard
             speeds
             if controller.isLidarCameraSupported {
-                Picker("Depth source", selection: Binding(get: { controller.depthSource },
-                                                          set: { controller.setDepthSource($0) })) {
-                    ForEach(DepthSource.allCases) { Text($0.rawValue).tag($0) }
+                if Self.showsDepthSourcePicker {
+                    Picker("Depth source", selection: Binding(get: { controller.depthSource },
+                                                              set: { controller.setDepthSource($0) })) {
+                        ForEach(DepthSource.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 300)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 300)
                 if controller.depthSource == .lidarCamera {
                     Toggle("Fill holes", isOn: Binding(get: { controller.fillHoles },
                                                        set: { controller.setFillHoles($0) }))
                         .frame(maxWidth: 300)
                 }
             }
-            Toggle("Fast person mask", isOn: Binding(get: { controller.fastMask },
+            Toggle("Person segmentation (fast)", isOn: Binding(get: { controller.fastMask },
                                                      set: { controller.setFastMask($0) }))
                 .frame(maxWidth: 300)
             if let note = controller.thermalNote {
