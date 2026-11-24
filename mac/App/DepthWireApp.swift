@@ -45,6 +45,8 @@ private enum Saved {
 final class AppModel: ObservableObject {
     @Published var extensionStatus = "Checking…"
     @Published var phoneStatus = "Starting…"
+    /// Whether depth is arriving from the phone, and over what.
+    @Published var link = DepthReceiver.Link.searching
     @Published var cameraStatus = "Waiting for camera extension"
     /// What the virtual camera is sending to other apps.
     @Published var preview: CGImage?
@@ -121,6 +123,12 @@ final class AppModel: ObservableObject {
         installer.onStatus = { [weak self] text in self?.extensionStatus = text }
         receiver.onStatus = { [weak self] text in
             DispatchQueue.main.async { self?.phoneStatus = text }
+        }
+        receiver.onLink = { [weak self] link in
+            DispatchQueue.main.async {
+                self?.link = link
+                if link == .searching { self?.fps = 0 }
+            }
         }
         receiver.onFrame = { [weak self] frame in self?.handleFrame(frame) }
 
@@ -326,6 +334,7 @@ struct ContentView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
+                signal
                 feed
                 status
             }
@@ -410,12 +419,41 @@ struct ContentView: View {
         }
     }
 
+    /// The first thing to look at: is depth arriving, from which phone, over what.
+    @ViewBuilder private var signal: some View {
+        let (color, symbol, title, detail): (Color, String, String, String) = {
+            switch model.link {
+            case .receiving(let name, let via):
+                let how = via.isEmpty ? "" : via.replacingOccurrences(of: " over ", with: "")
+                return (.green, how.contains("cable") ? "cable.connector" : "wifi",
+                        "Receiving depth from \(name)",
+                        [how.isEmpty ? nil : how.prefix(1).uppercased() + how.dropFirst(), model.fps > 0 ? String(format: "%.0f frames a second", model.fps) : nil]
+                            .compactMap { $0 }.joined(separator: " · "))
+            case .connecting(let name):
+                return (.orange, "antenna.radiowaves.left.and.right", "Found \(name), waiting for depth…",
+                        "Keep DepthWire open and in front on the phone.")
+            case .searching:
+                return (.red, "iphone.slash", "No signal from your iPhone",
+                        "Open DepthWire on the iPhone. Both need to be on the same Wi-Fi, or joined by a cable.")
+            }
+        }()
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(color).frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(detail).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Circle().fill(color).frame(width: 12, height: 12)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.5)))
+    }
+
     @ViewBuilder private var status: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            GridRow {
-                Text("iPhone").foregroundStyle(.secondary)
-                Text(model.phoneStatus)
-            }
             GridRow {
                 Text("Camera").foregroundStyle(.secondary)
                 Text(model.cameraStatus)

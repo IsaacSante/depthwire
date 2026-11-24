@@ -20,6 +20,17 @@ enum DepthSource: String, CaseIterable, Identifiable {
 final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVCaptureDataOutputSynchronizerDelegate {
     @Published private(set) var isStreaming = false
     @Published private(set) var status = "Idle"
+    /// Whether a Mac is taking the depth, and over what.
+    enum Link: Equatable {
+        case stopped
+        case waiting
+        case sending(count: Int, via: String)   // "Wi-Fi", "a cable"
+        case problem(String)
+    }
+    @Published private(set) var link = Link.stopped
+    /// What the phone itself is connected to: "Wi-Fi", "a cable", or nil when neither.
+    @Published private(set) var network: String?
+    private let pathMonitor = NWPathMonitor()
     @Published private(set) var preview: CGImage?
     @Published private(set) var fps: Double = 0
     /// Depth frames processed a second, person masks made a second, and how long one mask takes.
@@ -143,6 +154,12 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
     }
 
     func startSession() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let network: String? = path.status != .satisfied ? nil
+                : path.usesInterfaceType(.wiredEthernet) ? "a cable" : path.usesInterfaceType(.wifi) ? "Wi-Fi" : nil
+            DispatchQueue.main.async { self?.network = network }
+        }
+        pathMonitor.start(queue: netQueue)
         guard isSupported else {
             status = "This device has no LiDAR scanner"
             return
@@ -412,7 +429,7 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
 
     // MARK: - Networking (netQueue)
 
-    private func startListener(name: String) {
+    private func startListener(name: String, fixedPort: Bool = true) {
         let params = NWParameters.tcp
         params.includePeerToPeer = true
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
@@ -421,13 +438,15 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
         do {
             params.allowLocalEndpointReuse = true
             // a fixed port, so the Mac can also reach it over USB (usbmuxd), not just by Bonjour
-            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: DepthWireProtocol.usbPort)!)
+            // (if another app already holds that port, any free port still works over Wi-Fi and Ethernet)
+            let listener = fixedPort ? try NWListener(using: params, on: NWEndpoint.Port(rawValue: DepthWireProtocol.usbPort)!)
+                                     : try NWListener(using: params)
             listener.service = NWListener.Service(name: name, type: DepthWireProtocol.serviceType)
             listener.stateUpdateHandler = { [weak self] state in
                 switch state {
-                case .ready: self?.publishStatus("Waiting for Mac…")
+                case .ready: self?.publishStreaming()
                 case .failed(let error):
-                    self?.publishStatus("Listener failed: \(error.localizedDescription), trying again")
+                    self?.publishStatus("Couldn't start listening (\(error.localizedDescription)), trying again", .problem("Couldn't start, trying again"))
                     // try again in a second while streaming is on
                     self?.netQueue.asyncAfter(deadline: .now() + 1) { [weak self] in
                         guard let self, self.listener === listener else { return }
@@ -435,7 +454,8 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
                         DispatchQueue.main.async {
                             guard self.isStreaming else { return }
                             let name = UIDevice.current.name
-                            self.netQueue.async { self.startListener(name: name) }
+                            // second try on any free port, in case the fixed one is taken
+                            self.netQueue.async { self.startListener(name: name, fixedPort: !fixedPort) }
                         }
                     }
                 default: break
@@ -445,7 +465,11 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
             listener.start(queue: netQueue)
             self.listener = listener
         } catch {
-            publishStatus("Could not start: \(error.localizedDescription)")
+            if fixedPort {
+                startListener(name: name, fixedPort: false)
+            } else {
+                publishStatus("Could not start: \(error.localizedDescription)", .problem("Couldn't start"))
+            }
         }
     }
 
@@ -455,7 +479,7 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
         inFlight = []
         listener?.cancel()
         listener = nil
-        publishStatus("Idle")
+        publishStatus("Idle", .stopped)
         DispatchQueue.main.async { self.fps = 0 }
     }
 
@@ -478,8 +502,11 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
     }
 
     private func publishStreaming() {
-        let ready = connections.filter { $0.state == .ready }.count
-        publishStatus(ready == 0 ? "Waiting for Mac…" : ready == 1 ? "Streaming to Mac" : "Streaming to \(ready) Mac apps")
+        let ready = connections.filter { $0.state == .ready }
+        guard let first = ready.first else { publishStatus("Waiting for Mac…", .waiting); return }
+        let path = first.currentPath
+        let via = path?.usesInterfaceType(.wiredEthernet) == true ? "a cable" : path?.usesInterfaceType(.wifi) == true ? "Wi-Fi" : "a direct link"
+        publishStatus(ready.count == 1 ? "Streaming to Mac" : "Streaming to \(ready.count) Mac apps", .sending(count: ready.count, via: via))
     }
 
     private func send(_ raw: Data, flags: DepthWireProtocol.Flags, width: Int, height: Int, timestamp: Double) {
@@ -511,8 +538,11 @@ final class StreamController: NSObject, ObservableObject, ARSessionDelegate, AVC
         }
     }
 
-    private func publishStatus(_ text: String) {
-        DispatchQueue.main.async { self.status = text }
+    private func publishStatus(_ text: String, _ link: Link? = nil) {
+        DispatchQueue.main.async {
+            self.status = text
+            if let link { self.link = link }
+        }
     }
 
     // MARK: - Camera info

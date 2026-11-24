@@ -26,7 +26,7 @@ LiDAR depth (up to 320×240, 30 fps)      DepthWire for Mac
 - **Depth** is sent as 16-bit millimetres, so the Mac gets real distances, not a picture of them.
 - **Lens and gravity** travel with every frame, so the Mac can place each pixel in the room.
 - **Works in the dark.** LiDAR doesn't need light, and a projector's picture on the wall doesn't read as movement.
-- **Wired or wireless.** Wi-Fi works out of the box. For long shows, a USB-C Ethernet adapter on each end is steadier; the phone also listens on a fixed port (52345) for USB.
+- **Wired or wireless.** Wi-Fi works out of the box. For long shows, a USB-C Ethernet adapter on each end is steadier; the phone also listens on a fixed port (52346) for USB.
 
 The wire format is one file, [`Shared/DepthWireProtocol.swift`](Shared/DepthWireProtocol.swift), compiled into both apps.
 

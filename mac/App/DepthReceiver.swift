@@ -20,8 +20,21 @@ final class DepthReceiver {
     /// Called on `queue`.
     var onStatus: ((String) -> Void)?
 
+    /// Where the link to the phone stands. Called on `queue`.
+    enum Link: Equatable {
+        case searching                 // no phone found on the network
+        case connecting(String)        // found one, no depth yet
+        case receiving(String, String) // phone's name, " over Wi-Fi" / " over a cable…"
+    }
+    var onLink: ((Link) -> Void)?
+
     private var browser: NWBrowser?
     private var connection: NWConnection?
+    private var watchdog: DispatchSourceTimer?
+    private var lastFrame = Date()
+    private var link = Link.searching { didSet { if link != oldValue { onLink?(link) } } }
+    private var phoneName = "iPhone"
+    private var via = ""
 
     func start() {
         queue.async { [self] in
@@ -42,6 +55,23 @@ final class DepthReceiver {
             }
             browser.start(queue: queue)
             self.browser = browser
+            // A connection that hangs or goes quiet is dropped after 3 s and tried again, and a phone
+            // that shows up while nothing is connected is picked up without waiting for a change.
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + 1, repeating: 1)
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                if let connection = self.connection {
+                    if Date().timeIntervalSince(self.lastFrame) > 3 {
+                        self.onStatus?("No depth from \(self.phoneName) for 3 seconds, reconnecting…")
+                        connection.cancel()
+                    }
+                } else if let results = self.browser?.browseResults, !results.isEmpty {
+                    self.connectIfNeeded(results)
+                }
+            }
+            timer.resume()
+            watchdog = timer
             onStatus?("Looking for your iPhone… open DepthWire on it")
         }
     }
@@ -56,18 +86,24 @@ final class DepthReceiver {
 
         var name = "iPhone"
         if case .service(let serviceName, _, _, _) = result.endpoint { name = serviceName }
+        phoneName = name
+        lastFrame = Date()   // a new connection gets 3 s to start sending
+        link = .connecting(name)
+        onStatus?("Found \(name), connecting…")
 
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
             switch state {
             case .ready:
-                self.onStatus?("Connected to \(name)\(Self.describe(connection.currentPath))")
+                self.via = Self.describe(connection.currentPath)
+                self.onStatus?("Connected to \(name)\(self.via)")
                 self.receiveHeader(on: connection)
             case .waiting:
                 connection.cancel()
             case .failed, .cancelled:
                 guard self.connection === connection else { return }
                 self.connection = nil
+                self.link = .searching
                 self.onStatus?("Looking for your iPhone… open DepthWire on it")
                 self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
                     guard let self, let results = self.browser?.browseResults else { return }
@@ -126,6 +162,8 @@ final class DepthReceiver {
                 let mask = header.flags.contains(.personMask) ? plane(pixels) : nil
                 let camera = header.flags.contains(.camera)
                     ? DepthWireProtocol.CameraInfo(plane(DepthWireProtocol.CameraInfo.byteCount)) : nil
+                self.lastFrame = Date()
+                self.link = .receiving(self.phoneName, self.via)
                 self.onFrame?(Frame(depth: depth, confidence: confidence, personMask: mask, camera: camera,
                                     width: width, height: height))
             }

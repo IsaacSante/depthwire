@@ -77,8 +77,7 @@ struct ContentView: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(.thinMaterial, in: Capsule())
-            Text(controller.status)
-                .font(.headline)
+            linkCard
             speeds
             if controller.isLidarCameraSupported {
                 Picker("Depth source", selection: Binding(get: { controller.depthSource },
@@ -103,6 +102,42 @@ struct ContentView: View {
             }
         }
         .multilineTextAlignment(.center)
+    }
+
+    /// Is a Mac taking the depth, and over what.
+    private var linkCard: some View {
+        let (color, symbol, title, detail): (Color, String, String, String) = {
+            switch controller.link {
+            case .sending(let count, let via):
+                return (.green, via == "Wi-Fi" ? "wifi" : "cable.connector",
+                        count == 1 ? "Sending to your Mac" : "Sending to \(count) Mac apps", "Over \(via)")
+            case .waiting:
+                if let network = controller.network {
+                    return (.orange, "desktopcomputer", "Looking for your Mac",
+                            "This iPhone is on \(network). Open DepthWire on a Mac on the same network.")
+                }
+                return (.red, "wifi.slash", "Not on a network",
+                        "Join the same Wi-Fi as your Mac, or connect them with a cable.")
+            case .problem(let text):
+                return (.red, "exclamationmark.triangle", text, controller.status)
+            case .stopped:
+                return (.gray, "pause.circle", "Stopped", "Press Stream to start sending.")
+            }
+        }()
+        return HStack(spacing: 12) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(color).frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(detail).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Circle().fill(color).frame(width: 12, height: 12)
+        }
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: 340)
+        .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.5)))
     }
 
     /// Live frame rates: depth captured, frames sent to the Mac, and person masks made.

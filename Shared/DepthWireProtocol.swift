@@ -18,7 +18,7 @@ enum DepthWireProtocol {
     static let serviceType = "_depthwire._tcp"
     /// The phone always listens on this port too, so a Mac can reach it over the USB
     /// cable through usbmuxd (the tunnel Xcode uses), with no Wi-Fi in the way.
-    static let usbPort: UInt16 = 52345
+    static let usbPort: UInt16 = 52346
     static let magic: UInt32 = 0x4C44_5232 // "LDR2"
     static let headerSize = 28
 
