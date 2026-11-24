@@ -335,7 +335,7 @@ struct ContentView: View {
             .frame(width: 430)
         }
         .padding(20)
-        .frame(height: 800)
+        .frame(height: 860)
     }
 
     // MARK: the picture
@@ -454,26 +454,17 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var emptyRoom: some View {
-        section("2", "Calibrate empty room", "Step out, and DepthWire learns what the room looks like empty. After that it only shows people and things that weren't there. Works in the dark.", highlighted: true) {
-            HStack(spacing: 10) {
-                Button(action: model.recordEmptyRoom) {
-                    Label(recordTitle, systemImage: recordBusy ? "hourglass" : "scope")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.extraLarge)
-                .keyboardShortcut(.defaultAction)
-                .disabled(recordBusy)
-                Button(action: model.clearEmptyRoom) {
-                    Label("Reset calibration", systemImage: "arrow.counterclockwise")
-                        .padding(.vertical, 6)
-                }
-                .controlSize(.extraLarge)
-                .disabled(model.roomState != .ready)
-                .help("Forgets the calibration and shows the whole room again.")
+        section("2A", "Calibrate", "Step out, and DepthWire learns what the room looks like empty. After that it only shows people and things that weren't there. Works in the dark.", highlighted: true) {
+            Button(action: model.recordEmptyRoom) {
+                Label(recordTitle, systemImage: recordBusy ? "hourglass" : "scope")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.extraLarge)
+            .keyboardShortcut(.defaultAction)
+            .disabled(recordBusy)
             Label(roomCaption, systemImage: model.roomState == .ready ? "checkmark.circle.fill" : "info.circle")
                 .font(.callout)
                 .foregroundStyle(model.roomState == .ready ? Color.green : Color.secondary)
@@ -491,6 +482,18 @@ struct ContentView: View {
                 .help("How far in front of the calibrated room something has to be before it shows. Lower catches more, higher ignores more noise.")
                 Text(model.playerCount == 1 ? "1 person in view" : "\(model.playerCount) people in view")
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        section("2B", "Reset calibration", "Forget the empty room and show everything again. Use this if you move the phone or change rooms.") {
+            Button(action: model.clearEmptyRoom) {
+                Label("Reset calibration", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .controlSize(.large)
+            .disabled(model.roomState != .ready)
+            if model.roomState != .ready {
+                Text("Nothing to reset yet.").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -609,8 +612,9 @@ struct ContentView: View {
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text(number).font(.callout.bold()).frame(width: 24, height: 24)
-                    .background(Color.accentColor, in: Circle()).foregroundStyle(.white)
+                Text(number).font(.callout.bold()).padding(.horizontal, number.count > 1 ? 7 : 0)
+                    .frame(minWidth: 24, minHeight: 24)
+                    .background(Color.accentColor, in: Capsule()).foregroundStyle(.white)
                 Text(title).font(.title3.weight(.semibold))
             }
             Text(explanation).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
