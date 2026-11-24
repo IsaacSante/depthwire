@@ -1,101 +1,104 @@
-# DepthWire
+<h1 align="center">DepthWire</h1>
 
-**Make interactive installs with the phone you already have.**
+<p align="center"><b>Make interactive installs with the phone you already have.</b><br>
+An iPhone's LiDAR instead of a Kinect: the apps, the gear, the room setup and the visuals.</p>
 
-DepthWire is a toolkit for building installations that react to people, using an iPhone's LiDAR in place of a Kinect or an Orbbec. It covers the whole chain: the apps, the gear, setting up a room, and starting points for visuals.
+<p align="center">
+  <img src="media/phone.gif" width="250" alt="An iPhone on a tripod streaming depth to a laptop">
+  <img src="media/people.gif" width="250" alt="A cat walking past, shown as a clean shape on the laptop">
+  <img src="media/install.gif" width="250" alt="A person in front of a projection that reacts to them">
+</p>
 
-```
-iPhone (LiDAR)  →  Mac (DepthWire)  →  TouchDesigner or any app  →  projector
-```
+<p align="center">
+  <a href="https://github.com/IsaacSante/depthwire/releases"><img src="https://img.shields.io/badge/Download-DepthWire_for_Mac-2f6fed?style=for-the-badge&logo=apple&logoColor=white" alt="Download DepthWire for Mac"></a>
+  <img src="https://img.shields.io/badge/iPhone_app-coming_to_the_App_Store-555555?style=for-the-badge&logo=apple&logoColor=white" alt="iPhone app coming to the App Store">
+</p>
 
-It came out of a real install: a phone on a tripod, a laptop, a used projector, and a wall that moved when people did.
-
-## Download
-
-| | |
-|---|---|
-| **Mac app** | **[Download DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases)** (macOS 14 or later) |
-| **iPhone app** | Coming to the App Store. Until then, [build it from this repo](#build-from-source). |
-
-You need both: the iPhone sends the depth, the Mac receives it.
-
-## The toolkit
-
-| Step | | What's there |
-|---|---|---|
-| 1 | **[What you need](guide/gear.md)** | The gear list: phone, Mac, projector, and the adapters and cable for long shows, with models and prices. |
-| 2 | **[Get the apps talking](#get-started)** | Install both apps and see depth arrive. Four steps. |
-| 3 | **[Set up the room](guide/room-setup.md)** | Where to put the phone, calibrating the empty room, choosing the area. |
-| 4 | **[Make visuals](touchdesigner/)** | TouchDesigner starters you can paste in and build on. |
-| 5 | **[Run a show](guide/run-a-show.md)** | Wi-Fi or cable, keeping the phone alive all night, and a checklist before the doors open. |
-
-## Get started
-
-You need an iPhone with LiDAR: an iPhone 12 Pro or any later Pro model.
-
-1. **Mac:** open the download and drag DepthWire into Applications. Open it, and approve its camera when macOS asks (System Settings → General → Login Items & Extensions → Camera Extensions).
-2. **iPhone:** open DepthWire, on the same Wi-Fi as your Mac. It starts sending by itself.
-3. **Mac:** the banner at the top turns green, "Receiving depth from iPhone".
-4. **Any app:** choose **DepthWire** as the camera.
-
-In TouchDesigner that's a **Video Device In TOP** with DepthWire picked. Set Colors to **Grayscale** in DepthWire, and you get people in grey on black: white is near, dark is far.
-
-## Troubleshooting
-
-- **"No signal from your iPhone".** Open DepthWire on the phone and keep it on screen. Both devices must be on the same Wi-Fi, or joined by a cable.
-- **"Waiting for camera extension"** after you approved it. Quit DepthWire on the Mac and open it again.
-- **"Bonjour blocked".** Allow DepthWire under System Settings → Privacy & Security → Local Network.
-- **Movement leaves a trail.** Open Advanced and lower Steadiness.
-
-More in [Run a show](guide/run-a-show.md).
+<p align="center"><img src="media/setup.svg" width="820" alt="iPhone to Mac to your visuals to a projector"></p>
 
 ---
 
-## Build from source
+## 1 · What you need
 
-For developers. You need a recent Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) and an Apple Developer account. A free account can build the iPhone app; the Mac app contains a camera extension, which needs a paid one.
+- **An iPhone with LiDAR** (12 Pro or any later Pro)
+- **A Mac**
+- **A tripod** for the phone
+- **A projector**
 
-```bash
-cp Config/Signing.example.xcconfig Config/Signing.xcconfig
-```
+That's it for Wi-Fi. For shows that run for hours, add two Ethernet adapters and a long cable, about $70 in all.
 
-Put your Team ID and a bundle prefix you own in `Config/Signing.xcconfig`. It is never committed. Then:
+→ [The full gear list, with models and prices](guide/gear.md)
 
-```bash
-cd ios && xcodegen generate
-```
+## 2 · Get the apps talking
 
-```bash
-cd mac && xcodegen generate
-```
+<table><tr>
+<td width="270"><img src="media/phone.gif" width="250" alt="The iPhone app streaming on a tripod"></td>
+<td>
 
-Open `ios/DepthWire.xcodeproj` and run it on your phone. Open `mac/DepthWire.xcodeproj`, build, and copy the app to /Applications before launching: macOS only activates camera extensions from there.
+1. **Mac:** install [DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases) and approve its camera.
+2. **iPhone:** open DepthWire on the same Wi-Fi.
+3. The Mac shows a green **Receiving depth** banner.
+4. Pick **DepthWire** as the camera in any app.
 
-## What's in the repo
+The iPhone app isn't on the App Store yet. For now, [build it with Xcode](docs/development.md).
 
-| Folder | What's in it |
-|---|---|
-| [`guide/`](guide) | The gear list, room setup and show notes. |
-| [`touchdesigner/`](touchdesigner) | Starter scripts for visuals. |
-| [`ios/`](ios) | The iPhone app: reads LiDAR depth and sends it. |
-| [`mac/`](mac) | The Mac app and its camera extension. |
-| [`Shared/`](Shared) | The wire format, one file compiled into both apps. |
+</td>
+</tr></table>
 
-How the apps work, briefly:
+## 3 · Set up the room
 
-- The phone sends 16-bit depth in millimetres, up to 320×240, LZ4-compressed over TCP. The Mac finds it with Bonjour (`_depthwire._tcp`).
-- Each frame also carries the lens and which way is down, so the Mac can place every pixel in the room.
-- The Mac hides the calibrated room, keeps the chosen distances, colours the result and feeds it to a virtual camera.
-- A virtual camera is 8-bit. In Grayscale that is 256 steps across your range: `distance = Farthest − brightness × (Farthest − Nearest)`.
+<table><tr>
+<td width="270"><img src="media/calibrate.gif" width="250" alt="Calibrating: the room disappears from the depth picture"></td>
+<td>
 
-## Roadmap
+1. **Place the phone** on the tripod, low, facing the people. Don't move it again.
+2. **Calibrate.** Press the button and step out for 3 seconds. The room disappears.
+3. **Choose the area.** Set how near and how far to look.
 
-- [x] Mac download
-- [ ] iPhone app on the App Store
-- [ ] Full-precision depth output for TouchDesigner, Resolume and Unity
-- [ ] More TouchDesigner starters
-- [ ] No restart needed after approving the camera
+It works in the dark.
 
-## License
+→ [Room setup guide](guide/room-setup.md)
 
-[MIT](LICENSE). Free for anything, including commercial work.
+</td>
+</tr></table>
+
+## 4 · Make visuals
+
+<table><tr>
+<td width="270"><img src="media/people.gif" width="250" alt="Only what moves shows up: a cat as a depth shape"></td>
+<td>
+
+Only what wasn't in the empty room shows up: people, or a cat.
+
+In **TouchDesigner**, add a Video Device In TOP and pick DepthWire. You get grey shapes on black: white is near, dark is far.
+
+Paste in a starter and build from there.
+
+→ [TouchDesigner starters](touchdesigner/)
+
+</td>
+</tr></table>
+
+## 5 · Run a show
+
+<table><tr>
+<td width="270"><img src="media/install.gif" width="250" alt="The install: a projection reacting to a person"></td>
+<td>
+
+- **Use a cable** for anything that runs for hours.
+- **Keep the phone charging** through its adapter.
+- **Calibrate with the room empty** before the doors open.
+- **Walk the whole area** and watch the edges.
+
+→ [Show checklist and fixes](guide/run-a-show.md)
+
+</td>
+</tr></table>
+
+---
+
+<p align="center">
+  <a href="docs/development.md">Build from source</a> ·
+  <a href="guide/run-a-show.md#if-it-stops">Troubleshooting</a> ·
+  <a href="LICENSE">MIT license</a>, free for anything
+</p>

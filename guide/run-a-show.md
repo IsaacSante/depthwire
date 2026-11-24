@@ -31,3 +31,6 @@ Both apps show which one is in use. On the Mac it's in the banner at the top; on
 - **Banner goes red:** check the phone. Is DepthWire still open? Is the cable still in? It reconnects by itself once the phone is sending again.
 - **Visuals react to nothing, or to everything:** the phone moved. Calibrate again.
 - **The camera disappears from your app:** quit and reopen DepthWire on the Mac.
+- **"Waiting for camera extension" after you approved it:** quit and reopen DepthWire on the Mac.
+- **"Bonjour blocked":** allow DepthWire under System Settings → Privacy & Security → Local Network.
+- **Movement leaves a trail:** open Advanced and lower Steadiness.
