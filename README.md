@@ -1,7 +1,7 @@
 <h1 align="center">DepthWire</h1>
 
-<p align="center"><b>Make interactive installs with the phone you already have.</b><br>
-An iPhone's LiDAR instead of a Kinect: the apps, the gear, the room setup and the visuals.</p>
+<p align="center">An iPhone app and a Mac app that send the iPhone's LiDAR depth to your Mac as a camera,<br>
+for interactive installs in TouchDesigner or any app that takes a camera.</p>
 
 <p align="center">
   <img src="media/hero-apps.png" width="820" alt="DepthWire on a MacBook receiving depth from DepthWire on an iPhone">
