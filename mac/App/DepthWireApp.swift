@@ -320,20 +320,21 @@ struct ContentView: View {
             .frame(width: 720)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
                     distance
                     emptyRoom
                     look
                     advanced
-                    Button("Reset to defaults") { model.resetToDefaults() }
-                        .help("Puts every setting back to how DepthWire first opens. Your recorded empty room is kept.")
+                    Button("Reset all settings") { model.resetToDefaults() }
+                        .controlSize(.small)
+                        .help("Puts every slider and switch back to how DepthWire first opens. Your calibration is kept.")
                 }
                 .padding(.trailing, 12)
             }
-            .frame(width: 390)
+            .frame(width: 430)
         }
         .padding(20)
-        .frame(height: 720)
+        .frame(height: 800)
     }
 
     // MARK: the picture
@@ -420,7 +421,7 @@ struct ContentView: View {
     // MARK: setup
 
     @ViewBuilder private var distance: some View {
-        section("1", "Area", "Choose what the phone should pay attention to. Everything outside it is left out.") {
+        section("1", "Choose the area", "Tell the phone what to pay attention to. Everything outside it is ignored.") {
             Text("How near and how far").font(.subheadline.weight(.semibold))
             Group {
                 meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
@@ -449,22 +450,33 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var emptyRoom: some View {
-        section("2", "Calibrate empty room", "Show DepthWire the room with nobody in it. It then hides the room, so only people and things that weren't there show up. Works in the dark.") {
-            HStack {
+        section("2", "Calibrate empty room", "Step out, and DepthWire learns what the room looks like empty. After that it only shows people and things that weren't there. Works in the dark.", highlighted: true) {
+            HStack(spacing: 10) {
                 Button(action: model.recordEmptyRoom) {
-                    Text(recordTitle).frame(maxWidth: .infinity)
+                    Label(recordTitle, systemImage: recordBusy ? "hourglass" : "scope")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
-                .controlSize(.large)
                 .buttonStyle(.borderedProminent)
+                .controlSize(.extraLarge)
+                .keyboardShortcut(.defaultAction)
                 .disabled(recordBusy)
-                Button("Clear") { model.clearEmptyRoom() }
-                    .help("Forgets the calibration and shows the whole room again.")
-                    .controlSize(.large)
-                    .disabled(model.roomState != .ready)
+                Button(action: model.clearEmptyRoom) {
+                    Label("Reset calibration", systemImage: "arrow.counterclockwise")
+                        .padding(.vertical, 6)
+                }
+                .controlSize(.extraLarge)
+                .disabled(model.roomState != .ready)
+                .help("Forgets the calibration and shows the whole room again.")
             }
-            Text(roomCaption).font(.caption).foregroundStyle(.secondary)
-            Toggle("Hide the empty room", isOn: $model.hideRoom)
-                .disabled(model.roomState != .ready && !model.peopleFromCamera)
+            Label(roomCaption, systemImage: model.roomState == .ready ? "checkmark.circle.fill" : "info.circle")
+                .font(.callout)
+                .foregroundStyle(model.roomState == .ready ? Color.green : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.roomState == .ready || model.peopleFromCamera {
+                Toggle("Hide the empty room", isOn: $model.hideRoom)
+            }
             if model.hideRoom {
                 HStack {
                     Text("Sensitivity").frame(width: 84, alignment: .leading)
@@ -472,7 +484,7 @@ struct ContentView: View {
                     Text(String(format: "%.0f cm", model.thresholdCentimeters))
                         .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
                 }
-                .help("How far in front of the recorded room something has to be before it shows. Lower catches more, higher ignores more noise.")
+                .help("How far in front of the calibrated room something has to be before it shows. Lower catches more, higher ignores more noise.")
                 Text(model.playerCount == 1 ? "1 person in view" : "\(model.playerCount) people in view")
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
@@ -488,7 +500,7 @@ struct ContentView: View {
 
     private var recordTitle: String {
         switch model.roomState {
-        case .none: return "Calibrate empty room"
+        case .none: return "Calibrate"
         case .countdown(let n): return "Step out of view… \(n)"
         case .recording(let percent): return "Calibrating… \(percent)%"
         case .ready: return "Calibrate again"
@@ -497,14 +509,14 @@ struct ContentView: View {
 
     private var roomCaption: String {
         switch model.roomState {
-        case .none: return "Not calibrated yet. You get 3 seconds to step out of view."
-        case .countdown, .recording: return "Stay out of view until it finishes."
-        case .ready: return "Calibrated and saved. Calibrate again if the phone or the furniture moves."
+        case .none: return "Not calibrated yet. Press Calibrate, then you have 3 seconds to step out of view."
+        case .countdown, .recording: return "Stay out of view. Almost done…"
+        case .ready: return "Calibrated. Do it again if the phone or the furniture moves."
         }
     }
 
     @ViewBuilder private var look: some View {
-        section("3", "Look", "How the depth is drawn for other apps.") {
+        section("3", "Pick a look", "How the depth is drawn for other apps.") {
             Picker("Colors", selection: $model.palette) {
                 ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -590,17 +602,21 @@ struct ContentView: View {
 
     // MARK: pieces
 
-    private func section<Content: View>(_ number: String, _ title: String, _ explanation: String,
+    private func section<Content: View>(_ number: String, _ title: String, _ explanation: String, highlighted: Bool = false,
                                         @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text(number).font(.caption.bold()).frame(width: 20, height: 20)
+                Text(number).font(.callout.bold()).frame(width: 24, height: 24)
                     .background(Color.accentColor, in: Circle()).foregroundStyle(.white)
-                Text(title).font(.headline)
+                Text(title).font(.title3.weight(.semibold))
             }
-            Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(explanation).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             content()
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(highlighted ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(highlighted ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.08)))
     }
 
     private func meterSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
