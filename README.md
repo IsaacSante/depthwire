@@ -4,8 +4,7 @@
 An iPhone's LiDAR instead of a Kinect: the apps, the gear, the room setup and the visuals.</p>
 
 <p align="center">
-  <img src="media/phone.gif" width="250" alt="An iPhone on a tripod streaming depth to a laptop">
-  <img src="media/install-loop.gif" width="250" alt="A person in front of a projection that reacts to them">
+  <img src="media/install-loop.gif" width="300" alt="A person in front of a projection that reacts to them">
 </p>
 
 <p align="center">
@@ -30,19 +29,14 @@ That's it for Wi-Fi. For shows that run for hours, add two Ethernet adapters and
 
 ## 2 · Get the apps talking
 
-<table><tr>
-<td width="270"><img src="media/phone.gif" width="250" alt="The iPhone app streaming on a tripod"></td>
-<td>
+<p align="center"><img src="media/receiving.png" width="620" alt="DepthWire for Mac with a green banner: Receiving depth from iPhone, over Wi-Fi"></p>
 
 1. **Mac:** install [DepthWire for Mac](https://github.com/IsaacSante/depthwire/releases) and approve its camera.
 2. **iPhone:** open DepthWire on the same Wi-Fi.
-3. The Mac shows a green **Receiving depth** banner.
+3. The Mac shows a green **Receiving depth** banner, and the room appears.
 4. Pick **DepthWire** as the camera in any app.
 
 The iPhone app isn't on the App Store yet. For now, [build it with Xcode](docs/development.md).
-
-</td>
-</tr></table>
 
 ## 3 · Set up the room
 
