@@ -7,7 +7,7 @@ import Foundation
 /// Not thread-safe: use from one queue.
 final class DepthRenderer {
     enum Palette: String, CaseIterable, Identifiable {
-        case turbo = "Turbo"
+        case turbo = "Rainbow"
         case grayscale = "Grayscale"
         var id: Self { self }
     }

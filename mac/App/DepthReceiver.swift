@@ -42,7 +42,7 @@ final class DepthReceiver {
             }
             browser.start(queue: queue)
             self.browser = browser
-            onStatus?("Looking for iPhone… (press Stream on the phone)")
+            onStatus?("Looking for your iPhone… open DepthWire on it")
         }
     }
 
@@ -61,14 +61,14 @@ final class DepthReceiver {
             guard let self, let connection else { return }
             switch state {
             case .ready:
-                self.onStatus?("Connected to \(name)")
+                self.onStatus?("Connected to \(name)\(Self.describe(connection.currentPath))")
                 self.receiveHeader(on: connection)
             case .waiting:
                 connection.cancel()
             case .failed, .cancelled:
                 guard self.connection === connection else { return }
                 self.connection = nil
-                self.onStatus?("Looking for iPhone… (press Stream on the phone)")
+                self.onStatus?("Looking for your iPhone… open DepthWire on it")
                 self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
                     guard let self, let results = self.browser?.browseResults else { return }
                     self.connectIfNeeded(results)
@@ -78,6 +78,18 @@ final class DepthReceiver {
             }
         }
         connection.start(queue: queue)
+    }
+
+    /// " over Wi-Fi", " over an Ethernet cable"…: which link the depth is arriving on.
+    private static func describe(_ path: NWPath?) -> String {
+        guard let path else { return "" }
+        if path.usesInterfaceType(.wiredEthernet) {
+            // a phone on a USB cable shows up as a wired link too
+            return " over a cable (Ethernet or USB)"
+        }
+        if path.usesInterfaceType(.wifi) { return " over Wi-Fi" }
+        if path.usesInterfaceType(.other) { return " over a direct link" }
+        return ""
     }
 
     private func receiveHeader(on connection: NWConnection) {

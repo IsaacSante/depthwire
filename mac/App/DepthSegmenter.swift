@@ -44,6 +44,40 @@ final class DepthSegmenter {
     /// Previous frame's player centroids, by player index.
     private var previousCentroids: [UInt8: (x: Double, y: Double)] = [:]
 
+    /// Forgets the recorded empty room.
+    func clearBackground() {
+        background = []
+        backgroundWidth = 0
+        backgroundHeight = 0
+        previousCentroids = [:]
+        backgroundState = .none
+    }
+
+    /// The recorded empty room as a file: "DWR1", width and height (UInt16 LE), then Float32 millimetres.
+    func exportBackground() -> Data? {
+        guard case .ready = backgroundState else { return nil }
+        var data = Data("DWR1".utf8)
+        for value in [UInt16(backgroundWidth), UInt16(backgroundHeight)] {
+            withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        }
+        background.withUnsafeBufferPointer { data.append(Data(buffer: $0)) }
+        return data
+    }
+
+    /// Restores a room saved by `exportBackground`. Returns false if the file isn't one.
+    @discardableResult
+    func importBackground(_ data: Data) -> Bool {
+        guard data.count > 8, data.prefix(4) == Data("DWR1".utf8) else { return false }
+        let width = Int(data[4]) | Int(data[5]) << 8, height = Int(data[6]) | Int(data[7]) << 8
+        guard width > 0, height > 0, data.count == 8 + width * height * 4 else { return false }
+        background = data.dropFirst(8).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        backgroundWidth = width
+        backgroundHeight = height
+        previousCentroids = [:]
+        backgroundState = .ready(width: width, height: height)
+        return true
+    }
+
     func beginBackgroundCapture() {
         capturedFrames = 0
         captureSum = []

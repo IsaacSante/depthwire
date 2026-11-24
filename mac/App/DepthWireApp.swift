@@ -15,11 +15,18 @@ struct DepthWireApp: App {
     }
 }
 
-enum IsolateMode: String, CaseIterable, Identifiable {
-    case off = "Off"
-    case camera = "Camera AI"  // Vision person mask from the iPhone's color camera
-    case depth = "Depth"       // background subtraction on the LiDAR depth; works in the dark
-    var id: Self { self }
+enum IsolateMode {
+    case off
+    case camera  // Vision person mask from the iPhone's color camera
+    case depth   // the recorded empty room, subtracted from the LiDAR depth; works in the dark
+}
+
+/// Where the empty-room recording stands, for the button and its caption.
+enum RoomState: Equatable {
+    case none
+    case countdown(Int)
+    case recording(Int)   // percent
+    case ready
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -27,33 +34,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
+/// Settings that come back on the next launch.
+private enum Saved {
+    static let store = UserDefaults.standard
+    static func double(_ key: String, _ fallback: Double) -> Double { store.object(forKey: key) as? Double ?? fallback }
+    static func bool(_ key: String, _ fallback: Bool) -> Bool { store.object(forKey: key) as? Bool ?? fallback }
+    static func string(_ key: String) -> String { store.string(forKey: key) ?? "" }
+}
+
 final class AppModel: ObservableObject {
     @Published var extensionStatus = "Checking…"
     @Published var phoneStatus = "Starting…"
     @Published var cameraStatus = "Waiting for camera extension"
+    /// What the virtual camera is sending to other apps.
     @Published var preview: CGImage?
+    /// Everything the phone sees, shown in the corner while the empty room is hidden.
+    @Published var rawPreview: CGImage?
     @Published var fps: Double = 0
     /// Size of the depth frames arriving from the phone (already rotated upright).
     @Published var incomingSize: (width: Int, height: Int)?
     /// Whether the phone is sending a person mask with its frames.
     @Published var hasPersonMask = false
 
-    @Published var nearMeters: Double = 0.2 { didSet { pushSettings() } }
-    @Published var farMeters: Double = 5.0 { didSet { pushSettings() } }
-    @Published var autoRange = false { didSet { pushSettings() } }
+    @Published var nearMeters = Saved.double("near", 0.2) { didSet { changed("near", nearMeters) } }
+    @Published var farMeters = Saved.double("far", 5.0) { didSet { changed("far", farMeters) } }
+    @Published var autoRange = Saved.bool("autoRange", false) { didSet { changed("autoRange", autoRange) } }
     /// The range auto mode is currently using, for display.
     @Published var autoRangeMeters: (near: Float, far: Float)?
-    @Published var palette: DepthRenderer.Palette = .turbo { didSet { pushSettings() } }
-    @Published var framing: DepthRenderer.Framing = .fit { didSet { pushSettings() } }
-    @Published var isolate: IsolateMode = .off { didSet { pushSettings() } }
-    @Published var playerColors = false { didSet { pushSettings() } }
-    @Published var thresholdCentimeters: Double = 15 { didSet { pushSettings() } }
-    @Published var adaptBackground = true { didSet { pushSettings() } }
-    @Published var minConfidence: DepthPreprocessor.ConfidenceLevel = .medium { didSet { pushSettings() } }
-    @Published var smoothing: Double = 0.5 { didSet { pushSettings() } }
-    @Published var backgroundStatus = "Not captured"
+    @Published var palette = DepthRenderer.Palette(rawValue: Saved.string("palette")) ?? .turbo { didSet { changed("palette", palette.rawValue) } }
+    @Published var framing = DepthRenderer.Framing(rawValue: Saved.string("framing")) ?? .fit { didSet { changed("framing", framing.rawValue) } }
+    /// Show only what isn't part of the recorded empty room.
+    @Published var hideRoom = Saved.bool("hideRoom", false) { didSet { changed("hideRoom", hideRoom) } }
+    /// Find people with the phone's color camera instead of the recorded room. Needs light.
+    @Published var peopleFromCamera = Saved.bool("peopleFromCamera", false) { didSet { changed("peopleFromCamera", peopleFromCamera) } }
+    @Published var playerColors = Saved.bool("playerColors", false) { didSet { changed("playerColors", playerColors) } }
+    @Published var thresholdCentimeters = Saved.double("threshold", 15) { didSet { changed("threshold", thresholdCentimeters) } }
+    @Published var adaptBackground = Saved.bool("adapt", true) { didSet { changed("adapt", adaptBackground) } }
+    @Published var minConfidence = DepthPreprocessor.ConfidenceLevel(rawValue: Int(Saved.double("confidence", 1))) ?? .medium { didSet { changed("confidence", Double(minConfidence.rawValue)) } }
+    @Published var smoothing = Saved.double("smoothing", 0.5) { didSet { changed("smoothing", smoothing) } }
+    @Published var roomState = RoomState.none
     @Published var crop = CropSettings.load() { didSet { crop.save(); pushSettings() } }
-    /// A sample of what the phone sees, in room feet, for the calibration plot.
+    /// A sample of what the phone sees, in room feet, for the crop-box plots.
     @Published var cropPoints = [SIMD3<Float>]()
     /// The phone's own tilt reading, when its app sends one; the tilt slider is then unused.
     @Published var phoneTilt: Double?
@@ -77,6 +98,14 @@ final class AppModel: ObservableObject {
     private var frameCount = 0
     private var fpsWindowStart = CFAbsoluteTimeGetCurrent()
 
+    /// The recorded empty room, kept between launches.
+    private static let roomFile: URL = {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DepthWire", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("empty-room.bin")
+    }()
+
     init() {
         installer.onStatus = { [weak self] text in self?.extensionStatus = text }
         receiver.onStatus = { [weak self] text in
@@ -87,30 +116,61 @@ final class AppModel: ObservableObject {
         // Reading the camera list from CoreMediaIO needs camera permission.
         AVCaptureDevice.requestAccess(for: .video) { _ in }
         installer.activate()
+        receiver.queue.async { [self] in
+            if let data = try? Data(contentsOf: Self.roomFile) { segmenter.importBackground(data) }
+        }
         receiver.start()
         receiver.queue.async { [weak self] in self?.connectSinkIfNeeded() }
         pushSettings()
     }
 
-    /// Counts down so you can step out of frame, then records the empty scene.
-    func captureBackground() {
+    /// Counts down so you can step out of view, then records the empty room.
+    func recordEmptyRoom() {
+        if case .countdown = roomState { return }
+        if case .recording = roomState { return }
         for remaining in (1...3).reversed() {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(3 - remaining)) {
-                self.backgroundStatus = "Step out of frame… \(remaining)"
+                self.roomState = .countdown(remaining)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            self.roomState = .recording(0)
             self.receiver.queue.async { self.segmenter.beginBackgroundCapture() }
         }
+    }
+
+    /// Forgets the recorded empty room and shows everything again.
+    func clearEmptyRoom() {
+        hideRoom = false
+        receiver.queue.async { [self] in
+            segmenter.clearBackground()
+            try? FileManager.default.removeItem(at: Self.roomFile)
+        }
+    }
+
+    /// Every setting back to how the app first opens. The recorded room is kept.
+    func resetToDefaults() {
+        nearMeters = 0.2; farMeters = 5.0; autoRange = false
+        palette = .turbo; framing = .fit
+        hideRoom = false; peopleFromCamera = false; playerColors = false
+        thresholdCentimeters = 15; adaptBackground = true
+        minConfidence = .medium; smoothing = 0.5
+        crop = CropSettings()
     }
 
     func reinstallExtension() { installer.activate() }
     func removeExtension() { installer.deactivate() }
 
+    private func changed(_ key: String, _ value: Any) {
+        Saved.store.set(value, forKey: key)
+        pushSettings()
+    }
+
     private func pushSettings() {
         let near = Float(nearMeters), far = Float(farMeters), palette = palette, framing = framing
         let autoRange = autoRange
-        let isolate = isolate, playerColors = playerColors, threshold = Int(thresholdCentimeters * 10)
+        let isolate: IsolateMode = !hideRoom ? .off : peopleFromCamera ? .camera : .depth
+        let playerColors = playerColors, threshold = Int(thresholdCentimeters * 10)
         let adapt = adaptBackground, minConfidence = minConfidence, smoothing = Float(smoothing)
         let crop = crop
         receiver.queue.async { [self] in
@@ -121,7 +181,7 @@ final class AppModel: ObservableObject {
             preprocessor.minConfidence = minConfidence
             preprocessor.smoothing = smoothing
             depthCrop.settings = crop
-            // with the box on, the grays stretch across just the box
+            // with the box on, the colors stretch across just the box
             renderer.nearMeters = crop.enabled ? Float(crop.nearFeet * 0.3048) : near
             renderer.farMeters = crop.enabled ? Float(crop.farFeet * 0.3048) : far
             renderer.framing = framing
@@ -140,7 +200,7 @@ final class AppModel: ObservableObject {
         let connected = sink.connect()
         DispatchQueue.main.async {
             self.cameraStatus = connected
-                ? "“\(CameraConstants.deviceName)” is live — pick it in any app"
+                ? "“\(CameraConstants.deviceName)” is live. Pick it as the camera in any app."
                 : "Waiting for camera extension"
         }
     }
@@ -157,24 +217,35 @@ final class AppModel: ObservableObject {
         let (millimeters, points) = depthCrop.apply(filtered, width: width, height: height, camera: frame.camera,
                                                     wantsPoints: wantsPreview)
         let measuredTilt = depthCrop.measuredTiltDegrees
+        var recording = false
+        if case .capturing = segmenter.backgroundState { recording = true }
         let labels: [UInt8]?
         switch queueIsolate {
-        case .off:
-            labels = nil
-        case .camera:
-            labels = mask.map { $0.map { $0 >= 128 ? 1 : 0 } }
         case .depth:
             labels = segmenter.process(millimeters, width: width, height: height)
+        case .camera:
+            labels = mask.map { $0.map { $0 >= 128 ? 1 : 0 } }
+            if recording { _ = segmenter.process(millimeters, width: width, height: height) }
+        case .off:
+            labels = nil
+            // a recording has to be fed frames even while the room isn't being hidden
+            if recording { _ = segmenter.process(millimeters, width: width, height: height) }
         }
         if segmenter.backgroundState != lastBackgroundState {
+            let finished = recording && { if case .ready = segmenter.backgroundState { return true }; return false }()
             lastBackgroundState = segmenter.backgroundState
-            let text: String
+            let state: RoomState
             switch lastBackgroundState {
-            case .none: text = "Not captured"
-            case .capturing(let progress): text = "Capturing… \(Int(progress * 100))%"
-            case .ready(let w, let h): text = "Captured at \(w)×\(h) — keep the phone still"
+            case .none: state = .none
+            case .capturing(let progress): state = .recording(Int(progress * 100))
+            case .ready: state = .ready
             }
-            DispatchQueue.main.async { self.backgroundStatus = text }
+            if finished, let data = segmenter.exportBackground() { try? data.write(to: Self.roomFile) }
+            DispatchQueue.main.async {
+                self.roomState = state
+                // a fresh recording is there to be used
+                if finished { self.peopleFromCamera = false; self.hideRoom = true }
+            }
         }
 
         if queueAutoRange && !depthCrop.settings.enabled {
@@ -184,6 +255,12 @@ final class AppModel: ObservableObject {
         }
         let autoRangeMeters = queueAutoRange ? (autoRanger.nearMeters, autoRanger.farMeters) : nil
 
+        // the corner view: everything the phone sees, while the main view hides the room
+        var rawPreview: CGImage?
+        if wantsPreview, labels != nil {
+            rawPreview = renderer.render(millimeters: millimeters, labels: nil, width: width, height: height, makePreview: true).1
+        }
+        let hiding = labels != nil
         let (pixelBuffer, preview) = renderer.render(millimeters: millimeters, labels: labels, width: width,
                                                      height: height, makePreview: wantsPreview)
         if let pixelBuffer { sink.enqueue(pixelBuffer) }
@@ -200,7 +277,10 @@ final class AppModel: ObservableObject {
             if wantsPreview { lastPreview = now }
             DispatchQueue.main.async {
                 if let preview { self.preview = preview }
-                if wantsPreview { self.cropPoints = points }
+                if wantsPreview {
+                    self.cropPoints = points
+                    if hiding { if let rawPreview { self.rawPreview = rawPreview } } else if self.rawPreview != nil { self.rawPreview = nil }
+                }
                 if self.phoneTilt.map({ Int($0.rounded()) }) != measuredTilt.map({ Int($0.rounded()) }) {
                     self.phoneTilt = measuredTilt
                 }
@@ -219,153 +299,281 @@ final class AppModel: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage("showAdvanced") private var showAdvanced = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 feed
-                HStack(spacing: 12) {
-                    CropPlot(title: "Side: floor at bottom, phone at left", points: model.cropPoints, crop: model.crop, side: true)
-                    CropPlot(title: "Top: phone at left", points: model.cropPoints, crop: model.crop, side: false)
-                }
                 status
             }
             .frame(width: 720)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) { controls }
-                    .padding(.trailing, 12)
+                VStack(alignment: .leading, spacing: 18) {
+                    distance
+                    emptyRoom
+                    look
+                    advanced
+                    Button("Reset to defaults") { model.resetToDefaults() }
+                        .help("Puts every setting back to how DepthWire first opens. Your recorded empty room is kept.")
+                }
+                .padding(.trailing, 12)
             }
             .frame(width: 390)
         }
         .padding(20)
-        .frame(height: 680)
+        .frame(height: 640)
     }
 
+    // MARK: the picture
+
     @ViewBuilder private var feed: some View {
-            // Exactly what the virtual camera outputs: the 16:9 frame including any bars.
-            ZStack {
-                if let preview = model.preview {
-                    Image(decorative: preview, scale: 1).resizable()
-                } else {
-                    Color(white: 0.12)
-                        .overlay(Text("No depth yet").foregroundStyle(.secondary))
+        // Exactly what the virtual camera sends to other apps: the 16:9 frame including any bars.
+        ZStack {
+            if let preview = model.preview {
+                Image(decorative: preview, scale: 1).resizable()
+            } else {
+                Color(white: 0.12)
+                    .overlay(Text("No depth yet. Open DepthWire on your iPhone.").foregroundStyle(.secondary))
+            }
+        }
+        .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height),
+                     contentMode: .fit)
+        .overlay(alignment: .bottomTrailing) {
+            if let raw = model.rawPreview {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Everything the phone sees").font(.caption2).foregroundStyle(.white.opacity(0.85))
+                    Image(decorative: raw, scale: 1).resizable()
+                        .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height), contentMode: .fit)
+                        .frame(width: 210)
+                        .overlay(Rectangle().strokeBorder(.white.opacity(0.8)))
                 }
+                .padding(6)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                .padding(10)
             }
-            .aspectRatio(CGFloat(CameraConstants.output.width) / CGFloat(CameraConstants.output.height),
-                         contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
-            .overlay(alignment: .topLeading) {
-                if let size = model.incomingSize {
-                    badge("\(size.height > size.width ? "Portrait" : "Landscape") in · \(size.width)×\(size.height)",
-                          symbol: size.height > size.width ? "iphone" : "iphone.landscape")
-                }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
+        .overlay(alignment: .topLeading) { badge("What other apps get", symbol: "video") }
+        .overlay(alignment: .topTrailing) {
+            if model.fps > 0 { badge(String(format: "%.0f fps", model.fps), symbol: nil) }
+        }
+        .overlay {
+            if case .countdown(let n) = model.roomState {
+                Text("Step out of view… \(n)").font(.largeTitle.bold()).foregroundStyle(.white)
+                    .padding(18).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+            } else if case .recording = model.roomState {
+                RoundedRectangle(cornerRadius: 10).strokeBorder(.red, lineWidth: 5)
+                    .overlay(alignment: .top) {
+                        Text("Recording the empty room").font(.headline).foregroundStyle(.white)
+                            .padding(8).background(.red, in: Capsule()).padding(12)
+                    }
             }
-            .overlay(alignment: .topTrailing) {
-                if model.fps > 0 {
-                    badge(String(format: "%.0f fps", model.fps), symbol: nil)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                badge("Out · \(CameraConstants.output.width)×\(CameraConstants.output.height) 16:9", symbol: nil)
-            }
+        }
     }
 
     @ViewBuilder private var status: some View {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                GridRow {
-                    Text("iPhone").foregroundStyle(.secondary)
-                    Text(model.phoneStatus)
-                }
-                GridRow {
-                    Text("Camera").foregroundStyle(.secondary)
-                    Text(model.cameraStatus)
-                }
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                Text("iPhone").foregroundStyle(.secondary)
+                Text(model.phoneStatus)
+            }
+            GridRow {
+                Text("Camera").foregroundStyle(.secondary)
+                Text(model.cameraStatus)
+            }
+            if model.extensionStatus != "Installed" {
                 GridRow {
                     Text("Extension").foregroundStyle(.secondary)
                     Text(model.extensionStatus)
                 }
             }
-            .font(.callout)
+        }
+        .font(.callout)
     }
 
-    @ViewBuilder private var controls: some View {
-            HStack(spacing: 20) {
-                Picker("Colors", selection: $model.palette) {
-                    ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
-                }
-                Picker("Framing", selection: $model.framing) {
-                    ForEach(DepthRenderer.Framing.allCases) { Text($0.rawValue).tag($0) }
+    // MARK: setup
+
+    @ViewBuilder private var distance: some View {
+        section("1", "Distance", "Only things between these two distances from the phone are shown. Near is warm, far is cool.") {
+            Group {
+                meterSlider("Nearest", value: $model.nearMeters, range: 0...3)
+                meterSlider("Farthest", value: $model.farMeters, range: 0.5...10)
+            }
+            .disabled(model.autoRange)
+            HStack {
+                Toggle("Set it for me", isOn: $model.autoRange)
+                    .help("Fits the distances to the people in view, or to the whole scene when nobody is.")
+                if let range = model.autoRangeMeters {
+                    Text(String(format: "%.1f to %.1f m", range.near, range.far))
+                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var emptyRoom: some View {
+        section("2", "Empty room", "Record the room with nobody in it. DepthWire then hides the room, so only people and things that weren't there show up. Works in the dark.") {
+            HStack {
+                Button(action: model.recordEmptyRoom) {
+                    Text(recordTitle).frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .disabled(recordBusy)
+                Button("Clear") { model.clearEmptyRoom() }
+                    .controlSize(.large)
+                    .disabled(model.roomState != .ready)
+            }
+            Text(roomCaption).font(.caption).foregroundStyle(.secondary)
+            Toggle("Hide the empty room", isOn: $model.hideRoom)
+                .disabled(model.roomState != .ready && !model.peopleFromCamera)
+            if model.hideRoom {
+                HStack {
+                    Text("Sensitivity").frame(width: 84, alignment: .leading)
+                    Slider(value: $model.thresholdCentimeters, in: 3...60)
+                    Text(String(format: "%.0f cm", model.thresholdCentimeters))
+                        .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
+                }
+                .help("How far in front of the recorded room something has to be before it shows. Lower catches more, higher ignores more noise.")
+                Text(model.playerCount == 1 ? "1 person in view" : "\(model.playerCount) people in view")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var recordBusy: Bool {
+        switch model.roomState {
+        case .countdown, .recording: return true
+        default: return false
+        }
+    }
+
+    private var recordTitle: String {
+        switch model.roomState {
+        case .none: return "Record empty room"
+        case .countdown(let n): return "Step out of view… \(n)"
+        case .recording(let percent): return "Recording… \(percent)%"
+        case .ready: return "Record empty room again"
+        }
+    }
+
+    private var roomCaption: String {
+        switch model.roomState {
+        case .none: return "Nothing recorded yet. You get 3 seconds to step out of view."
+        case .countdown, .recording: return "Stay out of view until it finishes."
+        case .ready: return "Recorded and saved. Record again if the phone or the furniture moves."
+        }
+    }
+
+    @ViewBuilder private var look: some View {
+        section("3", "Look", "How the depth is drawn for other apps.") {
+            Picker("Colors", selection: $model.palette) {
+                ForEach(DepthRenderer.Palette.allCases) { Text($0.rawValue).tag($0) }
+            }
             .pickerStyle(.segmented)
+            Picker("Fit", selection: $model.framing) {
+                Text("Whole picture").tag(DepthRenderer.Framing.fit)
+                Text("Fill the frame").tag(DepthRenderer.Framing.fill)
+            }
+            .pickerStyle(.segmented)
+            Toggle("Give each person their own color", isOn: $model.playerColors)
+                .disabled(!model.hideRoom)
+        }
+    }
 
-            cropControls
-
-            isolateControls
-
-            HStack(spacing: 16) {
-                Picker("Confidence", selection: $model.minConfidence) {
+    @ViewBuilder private var advanced: some View {
+        DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Noise filter", selection: $model.minConfidence) {
                     ForEach(DepthPreprocessor.ConfidenceLevel.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 280)
-            }
-            HStack {
-                Text("Smoothing")
-                Slider(value: $model.smoothing, in: 0...0.9)
-                Text(model.smoothing == 0 ? "Off" : String(format: "%.0f%%", model.smoothing * 100))
-                    .font(.callout.monospacedDigit())
-                    .frame(width: 40, alignment: .trailing)
-            }
-
-            HStack {
-                Toggle("Auto range", isOn: $model.autoRange)
-                    .help("Fit the colors to the isolated people, or to the whole scene when nobody is isolated.")
-                if let range = model.autoRangeMeters {
-                    Text(String(format: "%.1f – %.1f m", range.near, range.far))
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                .help("Drops readings the LiDAR is unsure about: shiny or dark surfaces, far walls, edges.")
+                HStack {
+                    Text("Steadiness").frame(width: 84, alignment: .leading)
+                    Slider(value: $model.smoothing, in: 0...0.9)
+                    Text(model.smoothing == 0 ? "Off" : String(format: "%.0f%%", model.smoothing * 100))
+                        .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
                 }
-                Spacer()
+                .help("Averages each point over time to stop flicker. Higher is steadier but a little slower to react.")
+                Picker("Find people with", selection: $model.peopleFromCamera) {
+                    Text("The recorded room").tag(false)
+                    Text("The phone's camera").tag(true)
+                }
+                .pickerStyle(.segmented)
+                if model.peopleFromCamera {
+                    Text(model.hasPersonMask ? "Uses the phone's color camera to find people. Needs decent light."
+                                             : "The phone isn't sending a person mask yet.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Let the recorded room adapt to slow changes", isOn: $model.adaptBackground)
+                    .help("Moved furniture slowly blends into the recorded room instead of showing up as a person.")
+                Divider()
+                cropControls
+                Divider()
+                HStack {
+                    Button("Reinstall camera") { model.reinstallExtension() }
+                    Button("Remove camera") { model.removeExtension() }
+                }
+                .controlSize(.small)
+                .help("Installs or removes the “\(CameraConstants.deviceName)” virtual camera.")
             }
-            Group {
-                rangeSlider("Near", value: $model.nearMeters, range: 0...3)
-                rangeSlider("Far", value: $model.farMeters, range: 0.5...10)
-            }
-            .disabled(model.autoRange)
-
-            HStack {
-                Button("Reinstall Extension") { model.reinstallExtension() }
-                Button("Remove Extension") { model.removeExtension() }
-                Spacer()
-            }
-            .controlSize(.small)
+            .padding(.top, 8)
+        }
     }
 
     @ViewBuilder private var cropControls: some View {
-        Toggle("3D crop box: keep only this part of the room", isOn: $model.crop.enabled)
-        VStack(spacing: 2) {
-            feetSlider("Phone height", value: $model.crop.phoneHeightFeet, range: 0...10)
-            if let tilt = model.phoneTilt {
-                HStack {
-                    Text("Phone tilt").frame(width: 84, alignment: .leading)
-                    Text(String(format: "%.0f° measured by the phone, lens from the phone", tilt))
-                        .foregroundStyle(.secondary)
-                    Spacer()
+        Toggle("Room box: keep only one part of the room", isOn: $model.crop.enabled)
+        if model.crop.enabled {
+            VStack(spacing: 2) {
+                feetSlider("Phone height", value: $model.crop.phoneHeightFeet, range: 0...10)
+                if let tilt = model.phoneTilt {
+                    HStack {
+                        Text("Phone tilt").frame(width: 84, alignment: .leading)
+                        Text(String(format: "%.0f°, measured by the phone", tilt)).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                } else {
+                    degreeSlider("Phone tilt", value: $model.crop.phoneTiltDegrees, range: -45...45)
                 }
-            } else {
-                degreeSlider("Phone tilt", value: $model.crop.phoneTiltDegrees, range: -45...45)
+                feetSlider("Near", value: $model.crop.nearFeet, range: 0...20)
+                feetSlider("Far", value: $model.crop.farFeet, range: 1...20)
+                feetSlider("Left", value: $model.crop.leftFeet, range: 0...15)
+                feetSlider("Right", value: $model.crop.rightFeet, range: 0...15)
+                feetSlider("Floor", value: $model.crop.floorFeet, range: 0...6)
+                feetSlider("Top", value: $model.crop.topFeet, range: 1...12)
             }
-            feetSlider("Near", value: $model.crop.nearFeet, range: 0...20)
-            feetSlider("Far", value: $model.crop.farFeet, range: 1...20)
-            feetSlider("Left", value: $model.crop.leftFeet, range: 0...15)
-            feetSlider("Right", value: $model.crop.rightFeet, range: 0...15)
-            feetSlider("Floor", value: $model.crop.floorFeet, range: 0...6)
-            feetSlider("Top", value: $model.crop.topFeet, range: 1...12)
+            .font(.callout)
+            CropPlot(title: "From the side: floor at the bottom, phone at the left", points: model.cropPoints, crop: model.crop, side: true)
+            CropPlot(title: "From above: phone at the left", points: model.cropPoints, crop: model.crop, side: false)
         }
-        .font(.callout)
+    }
+
+    // MARK: pieces
+
+    private func section<Content: View>(_ number: String, _ title: String, _ explanation: String,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(number).font(.caption.bold()).frame(width: 20, height: 20)
+                    .background(Color.accentColor, in: Circle()).foregroundStyle(.white)
+                Text(title).font(.headline)
+            }
+            Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            content()
+        }
+    }
+
+    private func meterSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack {
+            Text(label).frame(width: 84, alignment: .leading)
+            Slider(value: value, in: range)
+            Text(String(format: "%.1f m", value.wrappedValue))
+                .font(.callout.monospacedDigit()).frame(width: 52, alignment: .trailing)
+        }
     }
 
     private func feetSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
@@ -373,8 +581,7 @@ struct ContentView: View {
             Text(label).frame(width: 84, alignment: .leading)
             Slider(value: value, in: range, step: 0.1)
             Text(String(format: "%.1f ft", value.wrappedValue))
-                .monospacedDigit()
-                .frame(width: 50, alignment: .trailing)
+                .monospacedDigit().frame(width: 52, alignment: .trailing)
         }
     }
 
@@ -383,53 +590,7 @@ struct ContentView: View {
             Text(label).frame(width: 84, alignment: .leading)
             Slider(value: value, in: range, step: 0.5)
             Text(String(format: "%.1f°", value.wrappedValue))
-                .monospacedDigit()
-                .frame(width: 50, alignment: .trailing)
-        }
-    }
-
-    @ViewBuilder private var isolateControls: some View {
-        HStack(spacing: 16) {
-            Picker("Isolate people", selection: $model.isolate) {
-                ForEach(IsolateMode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 250)
-            Toggle("Player colors", isOn: $model.playerColors)
-                .disabled(model.isolate == .off)
-            Spacer()
-            if model.isolate != .off {
-                Text(model.playerCount == 1 ? "1 person" : "\(model.playerCount) people")
-                    .font(.callout.monospacedDigit())
-            }
-        }
-
-        switch model.isolate {
-        case .off:
-            EmptyView()
-        case .camera:
-            Text(model.hasPersonMask
-                 ? "Person mask from the iPhone's color camera. Needs decent light."
-                 : "No person mask yet. Make sure the phone is streaming.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .depth:
-            HStack {
-                Button("Capture Background") { model.captureBackground() }
-                Text(model.backgroundStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Toggle("Adapt to room changes", isOn: $model.adaptBackground)
-                    .help("Moved furniture slowly blends into the background instead of showing up as a person.")
-            }
-            HStack {
-                Text("Threshold").frame(width: 70, alignment: .leading)
-                Slider(value: $model.thresholdCentimeters, in: 3...60)
-                Text(String(format: "%.0f cm", model.thresholdCentimeters))
-                    .font(.callout.monospacedDigit())
-                    .frame(width: 52, alignment: .trailing)
-            }
+                .monospacedDigit().frame(width: 52, alignment: .trailing)
         }
     }
 
@@ -443,16 +604,6 @@ struct ContentView: View {
         .background(.black.opacity(0.6), in: Capsule())
         .foregroundStyle(.white)
         .padding(8)
-    }
-
-    private func rangeSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        HStack {
-            Text(label).frame(width: 36, alignment: .leading)
-            Slider(value: value, in: range)
-            Text(String(format: "%.1f m", value.wrappedValue))
-                .font(.callout.monospacedDigit())
-                .frame(width: 52, alignment: .trailing)
-        }
     }
 }
 

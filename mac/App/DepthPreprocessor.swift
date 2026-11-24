@@ -14,9 +14,9 @@ final class DepthPreprocessor {
         var id: Self { self }
         var label: String {
             switch self {
-            case .all: return "All"
-            case .medium: return "Medium+"
-            case .high: return "High"
+            case .all: return "Off"
+            case .medium: return "Normal"
+            case .high: return "Strict"
             }
         }
     }
